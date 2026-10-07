@@ -1,0 +1,35 @@
+{
+  "name": "safar",
+  "version": "1.0.0",
+  "description": "Safar — a considered way to move through Bengaluru",
+  "directories": {
+    "doc": "docs",
+    "test": "tests"
+  },
+  "scripts": {
+    "dev": "next dev --hostname 0.0.0.0",
+    "build": "next build",
+    "start": "next start --hostname 0.0.0.0",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
+    "test:e2e": "playwright test",
+    "emulators": "firebase emulators:start --project demo-safar",
+    "setup:local": "node scripts/setup-local.mjs",
+    "seed": "tsx --env-file=.env.local scripts/seed.ts"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Ritik0712-ai/Safar.git"
+  },
+  "keywords": [],
+  "author": "Ritik Agarwal <ritikagarwal2468@gmail.com>",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/Ritik0712-ai/Safar/issues"
+  },
+  "homepage": "https://github.com/Ritik0712-ai/Safar#readme",
+  "private": true
+}
