@@ -1,0 +1,5 @@
+import {existsSync,writeFileSync} from 'node:fs';
+import {randomBytes} from 'node:crypto';
+if(existsSync('.env.local')) {console.log('.env.local already exists; left unchanged.');process.exit(0);}
+const secrets=['TRIP_PIN_ENCRYPTION_KEY','TRIP_PIN_HMAC_KEY','CURSOR_SIGNING_KEY'].map(k=>`${k}=${randomBytes(32).toString('hex')}`).join('\n');
+writeFileSync('.env.local',`NEXT_PUBLIC_FIREBASE_API_KEY=emulator-only\nNEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=demo-safar.firebaseapp.com\nNEXT_PUBLIC_FIREBASE_PROJECT_ID=demo-safar\nNEXT_PUBLIC_FIREBASE_DATABASE_URL=http://127.0.0.1:9000/?ns=demo-safar-default-rtdb\nNEXT_PUBLIC_FIREBASE_APP_ID=1:000000000:web:safar\nNEXT_PUBLIC_USE_EMULATORS=true\nFIREBASE_ADMIN_PROJECT_ID=demo-safar\nFIREBASE_AUTH_EMULATOR_HOST=127.0.0.1:9099\nFIRESTORE_EMULATOR_HOST=127.0.0.1:8080\nFIREBASE_DATABASE_EMULATOR_HOST=127.0.0.1:9000\nAPP_ORIGIN=http://localhost:3000\nAPP_ENV=development\nPAYMENT_MODE=test\nDEMO_MODE=true\nDEMO_DRIVER_UIDS=demo-driver\n${secrets}\n`,{mode:0o600});console.log('Local emulator configuration created. Provider services remain unavailable until configured.');
