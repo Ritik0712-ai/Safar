@@ -1,0 +1,18 @@
+'use client';
+import {createContext,useContext,useEffect,useState,useCallback,type ReactNode} from 'react';
+import {onAuthStateChanged,signOut,type User} from 'firebase/auth';
+import {useRouter} from 'next/navigation';
+import {firebase} from '@/lib/firebase/client';
+import type {Account,Driver} from '@/contracts';
+export class ApiError extends Error{constructor(message:string,public code:string,public requestId:string,public fields?:Record<string,string[]>){super(message);}}
+export async function api<T>(path:string,body?:unknown,method=body===undefined?'GET':'POST',key?:string,signal?:AbortSignal):Promise<T>{const token=await firebase()?.auth.currentUser?.getIdToken();const res=await fetch(`/api/${path}`,{method,headers:{...(token?{Authorization:`Bearer ${token}`}:{}) ,...(body!==undefined?{'Content-Type':'application/json','Idempotency-Key':key??crypto.randomUUID()}:{})},...(body!==undefined?{body:JSON.stringify(body)}:{}),signal,cache:'no-store'});const json=await res.json();if(!res.ok)throw new ApiError(json.error?.message??'This request failed. Please try again.',json.error?.code??'REQUEST_FAILED',json.requestId??'',json.error?.fieldErrors);return json.data as T;}
+export async function exchange(){const auth=firebase()?.auth;const token=await auth?.currentUser?.getIdToken(true);if(!token)return;const {csrf}=await api<{csrf:string}>('session');const res=await fetch('/api/session',{method:'POST',headers:{Authorization:`Bearer ${token}`,'x-csrf-token':csrf},body:'{}'});if(!res.ok)throw new Error('Sign in again to refresh your session.');}
+interface AuthContext {user:User|null;profile:Account|null;driver:Driver|null;loading:boolean;error:string;refresh:()=>Promise<void>;logout:()=>Promise<void>;online:boolean;configured:boolean}
+const Context=createContext<AuthContext>({user:null,profile:null,driver:null,loading:true,error:'',refresh:async()=>{},logout:async()=>{},online:true,configured:false});
+export function AuthProvider({children}:{children:ReactNode}){const [user,setUser]=useState<User|null>(null),[profile,setProfile]=useState<Account|null>(null),[driver,setDriver]=useState<Driver|null>(null),[loading,setLoading]=useState(true),[error,setError]=useState(''),[online,setOnline]=useState(true);const router=useRouter();const refresh=useCallback(async()=>{if(!firebase()?.auth.currentUser){setProfile(null);setDriver(null);return;}try{const data=await api<{profile:Account|null;driver:Driver|null}>('me');setProfile(data.profile);setDriver(data.driver);setError('');}catch(e){setError(e instanceof Error?e.message:'Unable to load your account.');}finally{setLoading(false);}},[]);
+ useEffect(()=>{const f=firebase();if(!f){setLoading(false);return;}return onAuthStateChanged(f.auth,async u=>{setUser(u);if(u)await refresh();else {setProfile(null);setDriver(null);setLoading(false);}});},[refresh]);
+ useEffect(()=>{const on=()=>setOnline(true),off=()=>setOnline(false);setOnline(navigator.onLine);window.addEventListener('online',on);window.addEventListener('offline',off);return()=>{window.removeEventListener('online',on);window.removeEventListener('offline',off);};},[]);
+ async function logout(){if(driver?.availability==='online')try{await api('drivers/me/availability',{online:false});}catch{}const {csrf}=await api<{csrf:string}>('session');await fetch('/api/session',{method:'DELETE',headers:{'x-csrf-token':csrf}});await firebase()&&signOut(firebase()!.auth);setProfile(null);router.push('/sign-in');router.refresh();}
+ return <Context.Provider value={{user,profile,driver,loading,error,refresh,logout,online,configured:!!process.env.NEXT_PUBLIC_FIREBASE_API_KEY}}>{children}</Context.Provider>;
+}
+export const useAuth=()=>useContext(Context);
