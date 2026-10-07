@@ -238,3 +238,7 @@ Proposed controlled-demo retention: live location deleted immediately on termina
 No automatic Firebase Functions/paid TTL assumed. Versioned operator maintenance script with dry-run and counts performs cleanup; authorize separately for a live dataset. Lazy expiry already guarantees booking correctness without scheduled cleanup. No process-global interval on serverless hosting. Cleanup respects relationships and never deletes captured records through Demo Reset. Log affected IDs/counts without secret or personal payloads.
 
 Migrate additively using schemaVersion. Validate existing data with dry-run; old financial snapshots remain stable. Index/rule changes deployed before readers relying on new fields. Field removal only after all deployed readers migrate. Test restoring emulator fixtures and downloading representative preview records; paid backup features are not assumed available on Spark. No credential or database modification has been performed by this specification.
+
+## Implementation clarification: route geometry storage
+
+Firestore Standard rejects nested arrays, including raw GeoJSON coordinate pairs. Quotes persist the validated geometry as routeGeometryJson (a bounded JSON string, exempt from indexing); authorized API responses decode it into the specified routeGeometry GeoJSON DTO. No public API contract changes. Matching locations use finite lat/lng fields plus geohash instead of a native GeoPoint, so DTO serialization remains explicit.

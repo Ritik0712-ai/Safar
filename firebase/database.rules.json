@@ -1,0 +1,102 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "driverAccess": {
+      "$uid": {
+        ".read": "auth != null && auth.uid == $uid",
+        ".write": false
+      }
+    },
+    "driverLocations": {
+      "$uid": {
+        ".read": "auth != null && auth.uid == $uid && root.child('driverAccess').child($uid).child('approved').val() == true && root.child('driverAccess').child($uid).child('expiresAt').val() > now",
+        ".write": "auth != null && auth.uid == $uid && root.child('driverAccess').child($uid).child('approved').val() == true && root.child('driverAccess').child($uid).child('expiresAt').val() > now",
+        ".validate": "newData.hasChildren(['lat','lng','accuracy','source','timestamp','sequence','sessionId'])",
+        "lat": {
+          ".validate": "newData.isNumber() && newData.val() >= -90 && newData.val() <= 90"
+        },
+        "lng": {
+          ".validate": "newData.isNumber() && newData.val() >= -180 && newData.val() <= 180"
+        },
+        "accuracy": {
+          ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 5000"
+        },
+        "source": {
+          ".validate": "newData.val() == 'gps' || (newData.val() == 'simulation' && root.child('driverAccess').child(auth.uid).child('simulationAllowed').val() == true)"
+        },
+        "timestamp": {
+          ".validate": "newData.isNumber() && newData.val() >= now - 15000 && newData.val() <= now + 10000"
+        },
+        "sequence": {
+          ".validate": "newData.isNumber() && newData.val() >= 0 && (!data.exists() || newData.parent().child('sessionId').val() != data.parent().child('sessionId').val() || newData.val() > data.val())"
+        },
+        "sessionId": {
+          ".validate": "newData.isString() && newData.val().length == 36 && newData.val() == root.child('driverAccess').child(auth.uid).child('sessionId').val()"
+        },
+        "$other": {
+          ".validate": false
+        }
+      }
+    },
+    "driverPresence": {
+      "$uid": {
+        ".read": "auth != null && auth.uid == $uid && root.child('driverAccess').child($uid).child('approved').val() == true && root.child('driverAccess').child($uid).child('expiresAt').val() > now",
+        ".write": "auth != null && auth.uid == $uid && root.child('driverAccess').child($uid).child('approved').val() == true && root.child('driverAccess').child($uid).child('expiresAt').val() > now",
+        ".validate": "newData.hasChildren(['online','timestamp','sessionId'])",
+        "online": {
+          ".validate": "newData.isBoolean()"
+        },
+        "timestamp": {
+          ".validate": "newData.isNumber() && newData.val() <= now + 10000"
+        },
+        "sessionId": {
+          ".validate": "newData.val() == root.child('driverAccess').child($uid).child('sessionId').val()"
+        },
+        "$other": {
+          ".validate": false
+        }
+      }
+    },
+    "rideAccess": {
+      "$rideId": {
+        ".read": "auth != null && root.child('rideAccess').child($rideId).child('trackingEnabled').val() == true && root.child('rideAccess').child($rideId).child('expiresAt').val() > now && (auth.uid == root.child('rideAccess').child($rideId).child('riderId').val() || auth.uid == root.child('rideAccess').child($rideId).child('driverId').val())",
+        ".write": false
+      }
+    },
+    "rideTracking": {
+      "$rideId": {
+        ".read": "auth != null && root.child('rideAccess').child($rideId).child('trackingEnabled').val() == true && root.child('rideAccess').child($rideId).child('expiresAt').val() > now && (auth.uid == root.child('rideAccess').child($rideId).child('riderId').val() || auth.uid == root.child('rideAccess').child($rideId).child('driverId').val())",
+        ".write": "auth != null && root.child('rideAccess').child($rideId).child('trackingEnabled').val() == true && root.child('rideAccess').child($rideId).child('expiresAt').val() > now && (auth.uid == root.child('rideAccess').child($rideId).child('riderId').val() || auth.uid == root.child('rideAccess').child($rideId).child('driverId').val()) && auth.uid == root.child('rideAccess').child($rideId).child('driverId').val() && root.child('driverAccess').child(auth.uid).child('expiresAt').val() > now",
+        ".validate": "newData.hasChildren(['lat','lng','accuracy','source','timestamp','sequence','sessionId','driverId'])",
+        "lat": {
+          ".validate": "newData.isNumber() && newData.val() >= -90 && newData.val() <= 90"
+        },
+        "lng": {
+          ".validate": "newData.isNumber() && newData.val() >= -180 && newData.val() <= 180"
+        },
+        "accuracy": {
+          ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 5000"
+        },
+        "source": {
+          ".validate": "newData.val() == 'gps' || (newData.val() == 'simulation' && root.child('driverAccess').child(auth.uid).child('simulationAllowed').val() == true)"
+        },
+        "timestamp": {
+          ".validate": "newData.isNumber() && newData.val() >= now - 15000 && newData.val() <= now + 10000"
+        },
+        "sequence": {
+          ".validate": "newData.isNumber() && newData.val() >= 0 && (!data.exists() || newData.parent().child('sessionId').val() != data.parent().child('sessionId').val() || newData.val() > data.val())"
+        },
+        "sessionId": {
+          ".validate": "newData.isString() && newData.val().length == 36 && newData.val() == root.child('driverAccess').child(auth.uid).child('sessionId').val()"
+        },
+        "driverId": {
+          ".validate": "newData.val() == auth.uid"
+        },
+        "$other": {
+          ".validate": false
+        }
+      }
+    }
+  }
+}

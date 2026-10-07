@@ -1,21 +1,428 @@
-'use client';
-import Link from 'next/link';
-import {useState,useEffect} from 'react';
-import {useRouter} from 'next/navigation';
-import {ShieldCheck,CheckCircle2,ReceiptText,Star,Download} from 'lucide-react';
-import {money,date,type Ride,type Payment as PaymentData} from '@/contracts';
-import {api,useAuth} from '@/components/auth-provider';
-import {firebase} from '@/lib/firebase/client';
-import {Button,Banner,Loading,Endpoints} from '@/components/ui';
-import {useResource,useMutation} from '@/lib/hooks';
-import {FareBreakdown} from './booking';
-interface CheckoutOptions {key:string;amount:number;currency:string;order_id:string;name:string;description:string;theme:{color:string};handler:(response:{razorpay_payment_id:string;razorpay_order_id:string;razorpay_signature:string})=>void;modal:{ondismiss:()=>void}}
-declare global {interface Window {Razorpay?:new(options:CheckoutOptions)=>{open:()=>void;on:(event:string,callback:()=>void)=>void}}}
-async function checkoutScript(){if(window.Razorpay)return;await new Promise<void>((resolve,reject)=>{const existing=document.querySelector<HTMLScriptElement>('script[data-razorpay]');if(existing)existing.remove();const script=document.createElement('script');script.dataset.razorpay='true';script.src='https://checkout.razorpay.com/v1/checkout.js';script.onload=()=>resolve();script.onerror=()=>reject(new Error('Checkout could not load. Try opening it again.'));document.body.appendChild(script);});}
-export function PaymentScreen({id,receipt=false}:{id:string;receipt?:boolean}){const router=useRouter(),auth=useAuth(),r=useResource<Ride>(`rides/${id}`,10000),m=useMutation(),[state,setState]=useState(''),[downloading,setDownloading]=useState(false),[statusBusy,setStatusBusy]=useState(false),[order,setOrder]=useState<{providerOrderId:string;checkoutKeyId:string;amountPaise:number}|null>(null);useEffect(()=>{if(receipt&&r.data&&!r.data.payment?.capturedPaymentId)router.replace(`/rider/rides/${id}/payment`);},[receipt,r.data,id,router]);if(r.loading)return <Loading/>;if(!r.data)return <Banner kind="error">{r.error||'This ride is unavailable.'}</Banner>;const ride=r.data,paid=!!ride.payment?.capturedPaymentId;async function check(){setStatusBusy(true);try{await api<PaymentData>(`rides/${id}/payment-status`);await r.refresh();await auth.refresh();setState('Payment status refreshed.');}catch(e){m.setError(e instanceof Error?e.message:'Payment status could not be confirmed.');}finally{setStatusBusy(false);}}
- async function pay(){m.setError('');setState('Preparing test checkout…');const o=order??await m.run<{providerOrderId:string;checkoutKeyId:string;amountPaise:number}>(`rides/${id}/payment-order`,{});if(!o){setState('');return;}setOrder(o);try{await checkoutScript();const checkout=new window.Razorpay!({key:o.checkoutKeyId,amount:o.amountPaise,currency:'INR',order_id:o.providerOrderId,name:'Safar',description:'Completed Economy ride · Test payment',theme:{color:'#006b5b'},handler:async response=>{setState('Verifying payment…');try{const result=await api<{status:string}>('payments/verify',{rideId:id,orderId:response.razorpay_order_id,paymentId:response.razorpay_payment_id,signature:response.razorpay_signature});await r.refresh();await auth.refresh();if(result.status==='paid')router.replace(`/rider/rides/${id}/receipt`);else {setState('Payment processing. Check its status before retrying.');for(let i=0;i<6;i++){await new Promise(resolve=>setTimeout(resolve,5000));const p=await api<PaymentData>(`rides/${id}/payment-status`);if(p.capturedPaymentId){await r.refresh();router.replace(`/rider/rides/${id}/receipt`);break;}}}}catch(e){m.setError(e instanceof Error?e.message:'We could not confirm payment. Check its status before retrying.');}},modal:{ondismiss:()=>setState('Payment wasn’t completed. Your agreed fare is saved.')}});checkout.on('payment.failed',()=>setState('Payment did not complete. Check its status before retrying.'));checkout.open();setState('Test checkout opened.');}catch(e){m.setError(e instanceof Error?e.message:'Checkout could not open.');setState('');}}
- async function download(){setDownloading(true);try{const token=await firebase()!.auth.currentUser!.getIdToken(),res=await fetch(`/api/rides/${id}/receipt`,{headers:{Authorization:`Bearer ${token}`}});if(!res.ok)throw new Error('Receipt download failed. Please try again.');const url=URL.createObjectURL(await res.blob()),a=document.createElement('a');a.href=url;a.download=`safar-TEST-${id}.pdf`;a.click();URL.revokeObjectURL(url);}catch(e){m.setError(e instanceof Error?e.message:'Download failed.');}finally{setDownloading(false);}}
- if(ride.status!=='completed')return <><Banner>Payment is available after completion.</Banner><Link className="button primary" href={`/rider/rides/${id}`}>Return to ride</Link></>;
- return <div className="payment-layout"><section className="panel"><div className="payment-title"><span>{paid?<CheckCircle2 size={31}/>:<ShieldCheck size={31}/>}</span><h1 tabIndex={-1}>{paid?'Test payment verified.':'One last stop.'}</h1><p>{paid?'Your journey and payment are recorded.':'Your journey is complete. Settle the agreed test fare.'}</p></div><Banner kind={paid?'success':'info'}>Test payment — no real money. {paid?'Not a tax invoice.':'Checkout remains in Razorpay Test Mode.'}</Banner>{ride.paymentStatus==='review_required'&&<Banner kind="warning">This payment needs support review. {paid?'Your original receipt is preserved.':'Check its status before making another payment.'}</Banner>}<div className="payment-total">{money(ride.fare.totalPaise)}</div><Endpoints pickup={ride.pickup.label} destination={ride.destination.label}/>{paid?<dl className="receipt-details">{[['Receipt',`TEST-${id}`],['Passenger',ride.riderSnapshot.displayName],['Driver',ride.driverSnapshot?.displayName??''],['Vehicle',`${ride.vehicleSnapshot?.make} ${ride.vehicleSnapshot?.model} · ${ride.vehicleSnapshot?.plate}`],['Completed',ride.completedAt?date(ride.completedAt):''],['Payment ID',ride.payment?.capturedPaymentId??''],['Journey',`${(ride.distanceMeters/1000).toFixed(1)} km · ${Math.round(ride.durationSeconds/60)} min`]].map(([title,value])=><div key={title}><dt>{title}</dt><dd>{value}</dd></div>)}</dl>:<FareBreakdown quote={ride}/>}<div className="action-stack">{m.error&&<Banner kind="error">{m.error}</Banner>}{state&&!paid&&<Banner>{state}</Banner>}{paid?<><Button busy={downloading} onClick={download}><Download size={18}/>Download receipt</Button><Link className="button secondary" href={`/rider/rides/${id}/rate`}>{ride.reviewId?'View my rating':'Rate driver'}</Link><Link className="button secondary" href="/rider">Book another ride</Link></>:<><Button busy={m.busy} disabled={!auth.online||['processing','review_required'].includes(ride.paymentStatus)||state==='Verifying payment…'} onClick={pay}>Pay {money(ride.fare.totalPaise)}</Button><Button variant="secondary" busy={statusBusy} disabled={!auth.online} onClick={check}>Check payment status</Button></>}<Link className="text-link" href="/rider/history">Back to activity</Link><Link className="text-link" href={`/rider/help/new?ride=${id}&category=payment`}>Get payment help</Link></div></section></div>;
+"use client";
+import Link from "next/link";
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { ShieldCheck, CheckCircle2, Star, Download } from "lucide-react";
+import {
+  money,
+  date,
+  type Ride,
+  type Payment as PaymentData,
+} from "@/contracts";
+import { api, useAuth } from "@/components/auth-provider";
+import { firebase } from "@/lib/firebase/client";
+import { Button, Banner, Loading, Endpoints } from "@/components/ui";
+import { useResource, useMutation } from "@/lib/hooks";
+import { FareBreakdown } from "./booking";
+interface CheckoutOptions {
+  key: string;
+  amount: number;
+  currency: string;
+  order_id: string;
+  name: string;
+  description: string;
+  theme: {
+    color: string;
+  };
+  handler: (response: {
+    razorpay_payment_id: string;
+    razorpay_order_id: string;
+    razorpay_signature: string;
+  }) => void;
+  modal: {
+    ondismiss: () => void;
+  };
 }
-export function Rating({id}:{id:string}){const router=useRouter(),r=useResource<Ride>(`rides/${id}`),m=useMutation(),[stars,setStars]=useState(0),[comment,setComment]=useState('');if(r.loading)return <Loading/>;if(!r.data)return <Banner kind="error">{r.error}</Banner>;const ride=r.data;if(ride.status!=='completed')return <><Banner>Ratings are available after completion.</Banner><Link href={`/rider/rides/${id}`} className="button primary">Return to ride</Link></>;const current=ride.review?.stars??stars;return <div className="payment-layout"><section className="panel"><div className="payment-title"><span><Star size={28}/></span><h1>How was your journey?</h1><p>{ride.review?'Thank you. Your rating is saved.':`Share your experience with ${ride.driverSnapshot?.displayName??'your driver'}.`}</p></div><div className="rating-stars" role="radiogroup" aria-label="Rate your ride">{[1,2,3,4,5].map(n=><button key={n} role="radio" aria-checked={current===n} aria-label={`${n} ${n===1?'star':'stars'}`} className={n<=current?'selected':''} disabled={!!ride.review} onClick={()=>setStars(n)} onKeyDown={e=>{if(e.key==='ArrowRight')setStars(Math.min(5,current+1));if(e.key==='ArrowLeft')setStars(Math.max(1,current-1));}}><Star size={32} fill={n<=current?'currentColor':'none'}/></button>)}</div><div className="field"><label htmlFor="feedback">A few words (optional)</label><textarea id="feedback" maxLength={500} readOnly={!!ride.review} value={ride.review?.comment??comment} onChange={e=>setComment(e.target.value)} placeholder="What made your ride work well?"/><small>{(ride.review?.comment??comment).length}/500</small></div>{m.error&&<Banner kind="error">{m.error}</Banner>}<div className="action-stack">{!ride.review&&<><Button busy={m.busy} disabled={!stars} onClick={()=>m.run(`rides/${id}/review`,{stars,comment},()=>router.push(`/rider/rides/${id}`))}>Submit rating</Button><Link className="button ghost" href={`/rider/rides/${id}`}>Skip for now</Link></>}{ride.review&&<Link className="button primary" href={`/rider/rides/${id}`}>Back to ride</Link>}</div></section></div>;}
+declare global {
+  interface Window {
+    Razorpay?: new (options: CheckoutOptions) => {
+      open: () => void;
+      on: (event: string, callback: () => void) => void;
+    };
+  }
+}
+async function checkoutScript() {
+  if (window.Razorpay) return;
+  await new Promise<void>((resolve, reject) => {
+    const existing = document.querySelector<HTMLScriptElement>(
+      "script[data-razorpay]",
+    );
+    if (existing) existing.remove();
+    const script = document.createElement("script");
+    script.dataset.razorpay = "true";
+    script.src = "https://checkout.razorpay.com/v1/checkout.js";
+    script.onload = () => resolve();
+    script.onerror = () =>
+      reject(new Error("Checkout could not load. Try opening it again."));
+    document.body.appendChild(script);
+  });
+}
+export function PaymentScreen({
+  id,
+  receipt = false,
+}: {
+  id: string;
+  receipt?: boolean;
+}) {
+  const router = useRouter(),
+    auth = useAuth(),
+    r = useResource<Ride>(`rides/${id}`, 10000),
+    m = useMutation(),
+    [state, setState] = useState(""),
+    [downloading, setDownloading] = useState(false),
+    [statusBusy, setStatusBusy] = useState(false),
+    [order, setOrder] = useState<{
+      providerOrderId: string;
+      checkoutKeyId: string;
+      amountPaise: number;
+    } | null>(null);
+  useEffect(() => {
+    if (receipt && r.data && !r.data.payment?.capturedPaymentId)
+      router.replace(`/rider/rides/${id}/payment`);
+  }, [receipt, r.data, id, router]);
+  if (r.loading) return <Loading />;
+  if (!r.data)
+    return (
+      <Banner kind="error">{r.error || "This ride is unavailable."}</Banner>
+    );
+  const ride = r.data,
+    paid = !!ride.payment?.capturedPaymentId;
+  async function check() {
+    setStatusBusy(true);
+    try {
+      await api<PaymentData>(`rides/${id}/payment-status`);
+      await r.refresh();
+      await auth.refresh();
+      setState("Payment status refreshed.");
+    } catch (e) {
+      m.setError(
+        e instanceof Error
+          ? e.message
+          : "Payment status could not be confirmed.",
+      );
+    } finally {
+      setStatusBusy(false);
+    }
+  }
+  async function pay() {
+    m.setError("");
+    setState("Preparing test checkout…");
+    const o =
+      order ??
+      (await m.run<{
+        providerOrderId: string;
+        checkoutKeyId: string;
+        amountPaise: number;
+      }>(`rides/${id}/payment-order`, {}));
+    if (!o) {
+      setState("");
+      return;
+    }
+    setOrder(o);
+    try {
+      await checkoutScript();
+      const checkout = new window.Razorpay!({
+        key: o.checkoutKeyId,
+        amount: o.amountPaise,
+        currency: "INR",
+        order_id: o.providerOrderId,
+        name: "Safar",
+        description: "Completed Economy ride · Test payment",
+        theme: { color: "#006b5b" },
+        handler: async (response) => {
+          setState("Verifying payment…");
+          try {
+            const result = await api<{
+              status: string;
+            }>("payments/verify", {
+              rideId: id,
+              orderId: response.razorpay_order_id,
+              paymentId: response.razorpay_payment_id,
+              signature: response.razorpay_signature,
+            });
+            await r.refresh();
+            await auth.refresh();
+            if (result.status === "paid")
+              router.replace(`/rider/rides/${id}/receipt`);
+            else {
+              setState("Payment processing. Check its status before retrying.");
+              for (let i = 0; i < 6; i++) {
+                await new Promise((resolve) => setTimeout(resolve, 5000));
+                const p = await api<PaymentData>(`rides/${id}/payment-status`);
+                if (p.capturedPaymentId) {
+                  await r.refresh();
+                  router.replace(`/rider/rides/${id}/receipt`);
+                  break;
+                }
+              }
+            }
+          } catch (e) {
+            m.setError(
+              e instanceof Error
+                ? e.message
+                : "We could not confirm payment. Check its status before retrying.",
+            );
+          }
+        },
+        modal: {
+          ondismiss: () =>
+            setState("Payment wasn’t completed. Your agreed fare is saved."),
+        },
+      });
+      checkout.on("payment.failed", () =>
+        setState("Payment did not complete. Check its status before retrying."),
+      );
+      checkout.open();
+      setState("Test checkout opened.");
+    } catch (e) {
+      m.setError(e instanceof Error ? e.message : "Checkout could not open.");
+      setState("");
+    }
+  }
+  async function download() {
+    setDownloading(true);
+    try {
+      const token = await firebase()!.auth.currentUser!.getIdToken(),
+        res = await fetch(`/api/rides/${id}/receipt`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+      if (!res.ok)
+        throw new Error("Receipt download failed. Please try again.");
+      const url = URL.createObjectURL(await res.blob()),
+        a = document.createElement("a");
+      a.href = url;
+      a.download = `safar-TEST-${id}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      m.setError(e instanceof Error ? e.message : "Download failed.");
+    } finally {
+      setDownloading(false);
+    }
+  }
+  if (ride.status !== "completed")
+    return (
+      <>
+        <Banner>Payment is available after completion.</Banner>
+        <Link className="button primary" href={`/rider/rides/${id}`}>
+          Return to ride
+        </Link>
+      </>
+    );
+  return (
+    <div className="payment-layout">
+      <section className="panel">
+        <div className="payment-title">
+          <span>
+            {paid ? <CheckCircle2 size={31} /> : <ShieldCheck size={31} />}
+          </span>
+          <h1 tabIndex={-1}>
+            {paid ? "Test payment verified." : "One last stop."}
+          </h1>
+          <p>
+            {paid
+              ? "Your journey and payment are recorded."
+              : "Your journey is complete. Settle the agreed test fare."}
+          </p>
+        </div>
+        <Banner kind={paid ? "success" : "info"}>
+          Test payment — no real money.{" "}
+          {paid
+            ? "Not a tax invoice."
+            : "Checkout remains in Razorpay Test Mode."}
+        </Banner>
+        {ride.paymentStatus === "review_required" && (
+          <Banner kind="warning">
+            This payment needs support review.{" "}
+            {paid
+              ? "Your original receipt is preserved."
+              : "Check its status before making another payment."}
+          </Banner>
+        )}
+        <div className="payment-total">{money(ride.fare.totalPaise)}</div>
+        <Endpoints
+          pickup={ride.pickup.label}
+          destination={ride.destination.label}
+        />
+        {paid ? (
+          <dl className="receipt-details">
+            {[
+              ["Receipt", `TEST-${id}`],
+              ["Passenger", ride.riderSnapshot.displayName],
+              ["Driver", ride.driverSnapshot?.displayName ?? ""],
+              [
+                "Vehicle",
+                `${ride.vehicleSnapshot?.make} ${ride.vehicleSnapshot?.model} · ${ride.vehicleSnapshot?.plate}`,
+              ],
+              ["Completed", ride.completedAt ? date(ride.completedAt) : ""],
+              ["Payment ID", ride.payment?.capturedPaymentId ?? ""],
+              [
+                "Journey",
+                `${(ride.distanceMeters / 1000).toFixed(1)} km · ${Math.round(ride.durationSeconds / 60)} min`,
+              ],
+            ].map(([title, value]) => (
+              <div key={title}>
+                <dt>{title}</dt>
+                <dd>{value}</dd>
+              </div>
+            ))}
+          </dl>
+        ) : (
+          <FareBreakdown quote={ride} />
+        )}
+        <div className="action-stack">
+          {m.error && <Banner kind="error">{m.error}</Banner>}
+          {state && !paid && <Banner>{state}</Banner>}
+          {paid ? (
+            <>
+              <Button busy={downloading} onClick={download}>
+                <Download size={18} />
+                Download receipt
+              </Button>
+              <Link
+                className="button secondary"
+                href={`/rider/rides/${id}/rate`}
+              >
+                {ride.reviewId ? "View my rating" : "Rate driver"}
+              </Link>
+              <Link className="button secondary" href="/rider">
+                Book another ride
+              </Link>
+            </>
+          ) : (
+            <>
+              <Button
+                busy={m.busy}
+                disabled={
+                  !auth.online ||
+                  ["processing", "review_required"].includes(
+                    ride.paymentStatus,
+                  ) ||
+                  state === "Verifying payment…"
+                }
+                onClick={pay}
+              >
+                Pay {money(ride.fare.totalPaise)}
+              </Button>
+              <Button
+                variant="secondary"
+                busy={statusBusy}
+                disabled={!auth.online}
+                onClick={check}
+              >
+                Check payment status
+              </Button>
+            </>
+          )}
+          <Link className="text-link" href="/rider/history">
+            Back to activity
+          </Link>
+          <Link
+            className="text-link"
+            href={`/rider/help/new?ride=${id}&category=payment`}
+          >
+            Get payment help
+          </Link>
+        </div>
+      </section>
+    </div>
+  );
+}
+export function Rating({ id }: { id: string }) {
+  const router = useRouter(),
+    r = useResource<Ride>(`rides/${id}`),
+    m = useMutation(),
+    [stars, setStars] = useState(0),
+    [comment, setComment] = useState("");
+  if (r.loading) return <Loading />;
+  if (!r.data) return <Banner kind="error">{r.error}</Banner>;
+  const ride = r.data;
+  if (ride.status !== "completed")
+    return (
+      <>
+        <Banner>Ratings are available after completion.</Banner>
+        <Link href={`/rider/rides/${id}`} className="button primary">
+          Return to ride
+        </Link>
+      </>
+    );
+  const current = ride.review?.stars ?? stars;
+  return (
+    <div className="payment-layout">
+      <section className="panel">
+        <div className="payment-title">
+          <span>
+            <Star size={28} />
+          </span>
+          <h1>How was your journey?</h1>
+          <p>
+            {ride.review
+              ? "Thank you. Your rating is saved."
+              : `Share your experience with ${ride.driverSnapshot?.displayName ?? "your driver"}.`}
+          </p>
+        </div>
+        <div
+          className="rating-stars"
+          role="radiogroup"
+          aria-label="Rate your ride"
+        >
+          {[1, 2, 3, 4, 5].map((n) => (
+            <button
+              key={n}
+              role="radio"
+              aria-checked={current === n}
+              aria-label={`${n} ${n === 1 ? "star" : "stars"}`}
+              className={n <= current ? "selected" : ""}
+              disabled={!!ride.review}
+              onClick={() => setStars(n)}
+              onKeyDown={(e) => {
+                if (e.key === "ArrowRight") setStars(Math.min(5, current + 1));
+                if (e.key === "ArrowLeft") setStars(Math.max(1, current - 1));
+              }}
+            >
+              <Star size={32} fill={n <= current ? "currentColor" : "none"} />
+            </button>
+          ))}
+        </div>
+        <div className="field">
+          <label htmlFor="feedback">A few words (optional)</label>
+          <textarea
+            id="feedback"
+            maxLength={500}
+            readOnly={!!ride.review}
+            value={ride.review?.comment ?? comment}
+            onChange={(e) => setComment(e.target.value)}
+            placeholder="What made your ride work well?"
+          />
+          <small>{(ride.review?.comment ?? comment).length}/500</small>
+        </div>
+        {m.error && <Banner kind="error">{m.error}</Banner>}
+        <div className="action-stack">
+          {!ride.review && (
+            <>
+              <Button
+                busy={m.busy}
+                disabled={!stars}
+                onClick={() =>
+                  m.run(`rides/${id}/review`, { stars, comment }, () =>
+                    router.push(`/rider/rides/${id}`),
+                  )
+                }
+              >
+                Submit rating
+              </Button>
+              <Link className="button ghost" href={`/rider/rides/${id}`}>
+                Skip for now
+              </Link>
+            </>
+          )}
+          {ride.review && (
+            <Link className="button primary" href={`/rider/rides/${id}`}>
+              Back to ride
+            </Link>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}

@@ -1,26 +1,634 @@
-import 'server-only';
-import {z} from 'zod';
-import {admin} from '@/lib/firebase/admin';
-import {versionSchema,type Ride,type Driver,type Vehicle,type Account,type Offer,type Quote,type Payment,type Review} from '@/contracts';
-import {canCancel,distance} from '@/lib/domain';
-import {base,updated,atomic,ensure,role,checkVersion,now,future,dto,event,page,serialize,type Actor,type Operation} from '@/server/core';
-import {secret,matches,reveal} from '@/server/providers/pin';
-import {person} from './accounts';
-import {candidateDrivers,fresh,syncRide} from './drivers';
-export async function authorizeRide(a:Actor,id:string){const doc=await admin().db.doc(`rides/${id}`).get();ensure(doc.exists&&(doc.data()?.riderId===a.uid||doc.data()?.driverId===a.uid||a.admin),404,'NOT_FOUND','This ride is unavailable.');return doc;}
-export async function normalize(a:Actor,id:string){await admin().db.runTransaction(async t=>{const ref=admin().db.doc(`rides/${id}`),doc=await t.get(ref);if(!doc.exists)return;const r=dto<Ride>(doc);ensure(r.riderId===a.uid||r.driverId===a.uid||a.admin,404,'NOT_FOUND','This ride is unavailable.');if(r.status!=='searching'||Date.parse(r.searchExpiresAt)>Date.now())return;const uref=admin().db.doc(`users/${r.riderId}`),u=await t.get(uref);t.update(ref,{status:'expired',expiredAt:now(),...updated(r.version),accessSyncPending:true});if(u.data()?.activeRideId===id)t.update(uref,{activeRideId:null,updatedAt:now()});t.delete(admin().db.doc(`rideSecrets/${id}`));event(t,id,r.version+1,'expired',a,r.status,'expired');});}
-export async function readRide(a:Actor,id:string){await authorizeRide(a,id);await normalize(a,id);await syncRide(id);const doc=await authorizeRide(a,id),r=dto<Ride>(doc);const q=await admin().db.doc(`quotes/${r.quoteId}`).get();const events=await doc.ref.collection('events').orderBy('createdAt').limit(30).get();const [payment,review,driver]=await Promise.all([r.paymentId?admin().db.doc(`payments/${id}`).get():null,r.reviewId?admin().db.doc(`reviews/${id}`).get():null,r.driverId?admin().db.doc(`drivers/${r.driverId}`).get():null]);const {candidateDriverIds:_,...safe}=doc.data()!;void _;return {id:doc.id,...serialize(safe) as object,routeGeometry:q.data()?.routeGeometry??null,events:events.docs.map(d=>dto<{eventType:string;createdAt:string}>(d)),payment:payment?.exists?dto<Payment>(payment):null,review:review?.exists?dto<Review>(review):null,driverRating:driver?.data()?.ratingCount?driver.data()!.ratingSum/driver.data()!.ratingCount:null};}
-export async function book(op:Operation){const a=op.actor;role(a,'rider',true);const {quoteId}=z.object({quoteId:z.string().min(1).max(128)}).strict().parse(op.body);const qdoc=await admin().db.doc(`quotes/${quoteId}`).get();ensure(qdoc.exists&&qdoc.data()?.riderId===a.uid,404,'NOT_FOUND','This quote is unavailable.');if(a.account?.activeRideId)await normalize(a,a.account.activeRideId);const candidates=await candidateDrivers(qdoc.data()!.pickup,a.uid);const id=admin().db.collection('rides').doc().id,pinSecret=secret(id);const result=await atomic(op,async t=>{const qr=admin().db.doc(`quotes/${quoteId}`),q=await t.get(qr),ur=admin().db.doc(`users/${a.uid}`),u=await t.get(ur),dr=await t.get(admin().db.doc(`drivers/${a.uid}`));const quote=dto<Quote>(q),user=dto<Account>(u);ensure(quote.riderId===a.uid,404,'NOT_FOUND','This quote is unavailable.');ensure(!quote.consumedByRideId,409,'QUOTE_USED','This quote already has a ride.');ensure(Date.parse(quote.expiresAt)>Date.now(),410,'QUOTE_EXPIRED','Your quote expired. Get a new fare.');ensure(!user.activeRideId,409,'ACTIVE_RIDE','Continue your active ride or payment first.');ensure(!dr.exists||(dr.data()?.availability==='offline'&&!dr.data()?.activeRideId),409,'DRIVING_CONFLICT','Go offline and finish your driver trip before booking.');t.create(admin().db.doc(`rides/${id}`),{...base(),riderId:a.uid,driverId:null,vehicleId:null,quoteId,serviceAreaId:'bengaluru-demo',rideType:'economy',status:'searching',paymentStatus:'not_due',paymentId:null,reviewId:null,pickup:quote.pickup,destination:quote.destination,riderSnapshot:person(user),distanceMeters:quote.distanceMeters,durationSeconds:quote.durationSeconds,fare:quote.fare,finalFarePaise:null,searchExpiresAt:future(120000),candidateDriverIds:candidates,dispatchStatus:'pending',dispatchAttemptCount:0,trackingMode:null,accessSyncVersion:1,accessSyncPending:false,cancellationFeePaise:0,isDemo:user.isDemo});t.create(admin().db.doc(`rideSecrets/${id}`),pinSecret);t.update(qr,{consumedByRideId:id,...updated(quote.version)});t.update(ur,{activeRideId:id,...updated(user.version)});event(t,id,1,'requested',a,null,'searching');return {rideId:id,status:'searching'};});await dispatch(result.rideId);return result;}
-export async function dispatch(id:string){const ref=admin().db.doc(`rides/${id}`),doc=await ref.get();if(!doc.exists||doc.data()?.status!=='searching'||doc.data()?.dispatchStatus==='ready')return;const r=doc.data()!;try{await admin().db.runTransaction(async t=>{const current=await t.get(ref);if(current.data()?.status!=='searching')return;const refs=(r.candidateDriverIds as string[]).map(uid=>admin().db.doc(`drivers/${uid}/offers/${id}`)),existing=refs.length?await t.getAll(...refs):[];refs.forEach((o,i)=>{if(!existing[i].exists)t.create(o,{...base(),rideId:id,driverId:r.candidateDriverIds[i],rideVersion:r.version,status:'open',expiresAt:r.searchExpiresAt,pickup:r.pickup,destination:r.destination,farePaise:r.fare.totalPaise,distanceMeters:r.distanceMeters,durationSeconds:r.durationSeconds,pickupDistanceMeters:0,isDemo:r.isDemo});});t.update(ref,{dispatchStatus:'ready',dispatchAttemptCount:(r.dispatchAttemptCount??0)+1});});}catch{await ref.update({dispatchStatus:'error'});}}
-export async function offers(a:Actor){role(a,'driver',true);const driver=dto<Driver>(await admin().db.doc(`drivers/${a.uid}`).get());if(driver.approvalStatus!=='approved'||driver.availability!=='online'||driver.activeRideId)return {items:[],nextCursor:null};const snap=await admin().db.collection(`drivers/${a.uid}/offers`).where('status','==','open').orderBy('expiresAt','asc').limit(10).get();const items:Offer[]=[];for(const doc of snap.docs){const offer=dto<Offer>(doc),r=await admin().db.doc(`rides/${offer.rideId}`).get();if(r.data()?.status==='searching'&&r.data()?.searchExpiresAt.toMillis()>Date.now())items.push({...offer,rideVersion:r.data()!.version,pickupDistanceMeters:driver.lastLocation?Math.round(distance(driver.lastLocation,offer.pickup)):0});}return {items,nextCursor:null};}
-export async function accept(op:Operation,id:string){const a=op.actor;role(a,'driver',true);const b=versionSchema.parse(op.body),location=await fresh(a.uid);const result=await atomic(op,async t=>{const db=admin().db,rr=db.doc(`rides/${id}`),dr=db.doc(`drivers/${a.uid}`),or=db.doc(`drivers/${a.uid}/offers/${id}`),[rd,dd,od,ud]=await t.getAll(rr,dr,or,db.doc(`users/${a.uid}`));const r=dto<Ride>(rd),d=dto<Driver>(dd),u=dto<Account>(ud);ensure(od.exists&&od.data()?.status==='open',404,'OFFER_UNAVAILABLE','This request is no longer available.');ensure(r.riderId!==a.uid,403,'OWN_RIDE','You cannot accept your own ride.');checkVersion(r,b.expectedVersion);ensure(r.status==='searching'&&Date.parse(r.searchExpiresAt)>Date.now(),409,'ALREADY_ACCEPTED','This request expired or another driver accepted.');ensure(d.approvalStatus==='approved'&&d.availability==='online'&&!d.activeRideId&&!u.activeRideId,409,'DRIVER_UNAVAILABLE','You must be online and free before accepting.');ensure(Date.now()-location.timestamp<=15000&&distance(location,r.pickup)<=5000,409,'LOCATION_CHANGED','You are outside the pickup area or your location is stale.');ensure(d.activeVehicleId,409,'NO_VEHICLE','An approved vehicle is required.');const [vdoc,rider]=await t.getAll(db.doc(`vehicles/${d.activeVehicleId}`),db.doc(`users/${r.riderId}`)),v=dto<Vehicle>(vdoc);ensure(v.approvalStatus==='approved'&&v.applicationVersion===d.applicationVersion&&rider.data()?.activeRideId===id,409,'STATE_CHANGED','The request or vehicle changed.');t.update(rr,{...updated(r.version),driverId:a.uid,vehicleId:v.id,driverSnapshot:person(u),vehicleSnapshot:v,status:'assigned',assignedAt:now(),trackingMode:location.source,accessSyncPending:true});t.update(dr,{...updated(d.version),availability:'busy',activeRideId:id});t.update(or,{status:'accepted',respondedAt:now()});event(t,id,r.version+1,'assigned',a,r.status,'assigned');return {rideId:id,status:'assigned'};});await syncRide(id);return result;}
-export async function decline(op:Operation,id:string){role(op.actor,'driver');return atomic(op,async t=>{const ref=admin().db.doc(`drivers/${op.actor.uid}/offers/${id}`),doc=await t.get(ref);ensure(doc.exists,404,'NOT_FOUND','This offer is unavailable.');t.update(ref,{status:'declined',respondedAt:now()});return {declined:true};});}
-export async function transition(op:Operation,id:string,action:string){const a=op.actor;const b=versionSchema.extend({pin:z.string().regex(/^\d{4}$/).optional(),reason:z.string().min(5).max(64).optional(),note:z.string().max(300).optional()}).strict().parse(op.body);await authorizeRide(a,id);const result=await atomic(op,async t=>{const db=admin().db,rr=db.doc(`rides/${id}`),rd=await t.get(rr),r=dto<Ride>(rd);ensure(r.riderId===a.uid||r.driverId===a.uid,404,'NOT_FOUND','This ride is unavailable.');checkVersion(r,b.expectedVersion);const ur=db.doc(`users/${r.riderId}`),ud=await t.get(ur),dr=r.driverId?db.doc(`drivers/${r.driverId}`):null,dd=dr?await t.get(dr):null,sref=db.doc(`rideSecrets/${id}`),sd=action==='start'?await t.get(sref):null;let target=r.status;
- if(action==='cancel'){ensure(canCancel(r.status),409,'CANNOT_CANCEL','This ride can no longer be cancelled.');ensure(b.reason,422,'REASON_REQUIRED','Choose a reason for cancellation.');if(r.driverId===a.uid&&b.reason==='other')ensure(b.note&&b.note.length>=5,422,'NOTE_REQUIRED','Explain why you need to cancel.');target='cancelled';}
- else {role(a,'driver',true);ensure(r.driverId===a.uid,404,'NOT_FOUND','This trip is unavailable.');const required={arrive:'assigned',start:'arrived',complete:'in_progress'}[action];ensure(required&&r.status===required,409,'INVALID_TRANSITION','The trip stage changed. Refresh before continuing.');if(action==='start'){ensure(sd?.exists&&b.pin&&matches(id,b.pin,sd.data()!.pinHmac),422,'INVALID_PIN','The trip PIN does not match. Ask the passenger and try again.');target='in_progress';}else target=action==='arrive'?'arrived':'completed';}
- const update:Record<string,unknown>={...updated(r.version),status:target,accessSyncPending:true};if(action==='arrive')update.arrivedAt=now();if(action==='start'){update.startedAt=now();t.delete(sref);}if(action==='cancel'){Object.assign(update,{cancelledAt:now(),cancelledBy:a.uid,cancelledByRole:a.uid===r.riderId?'rider':'driver',cancellationReason:b.reason,cancellationNote:b.note??''});if(ud.data()?.activeRideId===id)t.update(ur,{activeRideId:null,updatedAt:now()});t.delete(sref);}
- if(action==='complete'){Object.assign(update,{completedAt:now(),paymentStatus:'pending',paymentId:id,finalFarePaise:r.fare.totalPaise});const platformSharePaise=Math.round(r.fare.totalPaise*r.fare.commissionBps/10000);t.create(db.doc(`payments/${id}`),{...base(),rideId:id,riderId:r.riderId,driverId:r.driverId,provider:'razorpay',mode:'test',amountPaise:r.fare.totalPaise,currency:'INR',status:'pending',orderCreationState:'not_started',providerReceipt:`safar_${id}`,providerOrderId:null,capturedPaymentId:null,receiptId:null,driverSharePaise:r.fare.totalPaise-platformSharePaise,platformSharePaise,isDemo:rd.data()!.isDemo});}
- if((action==='cancel'||action==='complete')&&dr&&dd?.exists)t.update(dr,{activeRideId:null,availability:'offline',...updated(dd.data()!.version)});t.update(rr,update);event(t,id,r.version+1,action==='start'?'started':action==='complete'?'completed':target,a,r.status,target);return {rideId:id,status:target};});await syncRide(id);return result;}
-export async function pin(a:Actor,id:string){const doc=await authorizeRide(a,id),r=dto<Ride>(doc);ensure(r.riderId===a.uid&&['assigned','arrived'].includes(r.status),404,'PIN_UNAVAILABLE','The trip PIN is unavailable at this stage.');const s=await admin().db.doc(`rideSecrets/${id}`).get();ensure(s.exists,404,'PIN_UNAVAILABLE','Trip verification is unavailable.');return {pin:reveal(s.data() as {pinCiphertext:string;pinNonce:string;pinTag:string})};}
-export async function history(a:Actor,workspace:string,status:string|null,cursor:string|null){role(a,workspace==='driver'?'driver':'rider');let q=admin().db.collection('rides').where(workspace==='driver'?'driverId':'riderId','==',a.uid);if(status==='completed')q=q.where('status','==','completed');if(status==='cancelled')q=q.where('status','in',['cancelled','expired']);const p=await page<Ride>(q,`${a.uid}:rides:${workspace}:${status}`,cursor);return {...p,items:p.items.map(r=>{const safe={...r} as Ride&{candidateDriverIds?:string[]};delete safe.candidateDriverIds;return safe;})};}
-export async function review(op:Operation,id:string){const a=op.actor,b=z.object({stars:z.number().int().min(1).max(5),comment:z.string().max(500).default('')}).strict().parse(op.body);return atomic(op,async t=>{const rr=admin().db.doc(`rides/${id}`),rd=await t.get(rr),r=dto<Ride>(rd);ensure(r.riderId===a.uid&&r.status==='completed',404,'NOT_FOUND','This completed ride is unavailable.');const ref=admin().db.doc(`reviews/${id}`),old=await t.get(ref),dr=admin().db.doc(`drivers/${r.driverId}`),dd=await t.get(dr);ensure(!old.exists,409,'ALREADY_REVIEWED','You already rated this ride.');t.create(ref,{schemaVersion:1,createdAt:now(),rideId:id,riderId:a.uid,driverId:r.driverId,...b,isDemo:rd.data()!.isDemo});t.update(rr,{reviewId:id,...updated(r.version)});t.update(dr,{ratingSum:dd.data()!.ratingSum+b.stars,ratingCount:dd.data()!.ratingCount+1});return {saved:true};});}
+import "server-only";
+import { z } from "zod";
+import { admin } from "@/lib/firebase/admin";
+import {
+  versionSchema,
+  type Ride,
+  type Driver,
+  type Vehicle,
+  type Account,
+  type Offer,
+  type Quote,
+  type Payment,
+  type Review,
+} from "@/contracts";
+import { canCancel, distance } from "@/lib/domain";
+import {
+  base,
+  updated,
+  atomic,
+  ensure,
+  role,
+  checkVersion,
+  now,
+  future,
+  dto,
+  event,
+  page,
+  serialize,
+  type Actor,
+  type Operation,
+} from "@/server/core";
+import { secret, matches, reveal } from "@/server/providers/pin";
+import { person } from "./accounts";
+import { candidateDrivers, fresh, syncRide } from "./drivers";
+export async function authorizeRide(a: Actor, id: string) {
+  const doc = await admin().db.doc(`rides/${id}`).get();
+  ensure(
+    doc.exists &&
+      (doc.data()?.riderId === a.uid ||
+        doc.data()?.driverId === a.uid ||
+        a.admin),
+    404,
+    "NOT_FOUND",
+    "This ride is unavailable.",
+  );
+  return doc;
+}
+export async function normalize(a: Actor, id: string) {
+  await admin().db.runTransaction(async (t) => {
+    const ref = admin().db.doc(`rides/${id}`),
+      doc = await t.get(ref);
+    if (!doc.exists) return;
+    const r = dto<Ride>(doc);
+    ensure(
+      r.riderId === a.uid || r.driverId === a.uid || a.admin,
+      404,
+      "NOT_FOUND",
+      "This ride is unavailable.",
+    );
+    if (r.status !== "searching" || Date.parse(r.searchExpiresAt) > Date.now())
+      return;
+    const uref = admin().db.doc(`users/${r.riderId}`),
+      u = await t.get(uref);
+    t.update(ref, {
+      status: "expired",
+      expiredAt: now(),
+      ...updated(r.version),
+      accessSyncPending: true,
+    });
+    if (u.data()?.activeRideId === id)
+      t.update(uref, { activeRideId: null, updatedAt: now() });
+    t.delete(admin().db.doc(`rideSecrets/${id}`));
+    event(t, id, r.version + 1, "expired", a, r.status, "expired");
+  });
+}
+export async function readRide(a: Actor, id: string) {
+  await authorizeRide(a, id);
+  await normalize(a, id);
+  await syncRide(id);
+  const doc = await authorizeRide(a, id),
+    r = dto<Ride>(doc);
+  const q = await admin().db.doc(`quotes/${r.quoteId}`).get();
+  const events = await doc.ref
+    .collection("events")
+    .orderBy("createdAt")
+    .limit(30)
+    .get();
+  const [payment, review, driver] = await Promise.all([
+    r.paymentId ? admin().db.doc(`payments/${id}`).get() : null,
+    r.reviewId ? admin().db.doc(`reviews/${id}`).get() : null,
+    r.driverId ? admin().db.doc(`drivers/${r.driverId}`).get() : null,
+  ]);
+  const { candidateDriverIds: _, ...safe } = doc.data()!;
+  void _;
+  return {
+    id: doc.id,
+    ...(serialize(safe) as object),
+    routeGeometry: q.data()?.routeGeometryJson
+      ? JSON.parse(q.data()!.routeGeometryJson)
+      : null,
+    events: events.docs.map((d) =>
+      dto<{ eventType: string; createdAt: string }>(d),
+    ),
+    payment: payment?.exists ? dto<Payment>(payment) : null,
+    review: review?.exists ? dto<Review>(review) : null,
+    driverRating: driver?.data()?.ratingCount
+      ? driver.data()!.ratingSum / driver.data()!.ratingCount
+      : null,
+  };
+}
+export async function book(op: Operation) {
+  const a = op.actor;
+  role(a, "rider", true);
+  const { quoteId } = z
+    .object({ quoteId: z.string().min(1).max(128) })
+    .strict()
+    .parse(op.body);
+  const qdoc = await admin().db.doc(`quotes/${quoteId}`).get();
+  ensure(
+    qdoc.exists && qdoc.data()?.riderId === a.uid,
+    404,
+    "NOT_FOUND",
+    "This quote is unavailable.",
+  );
+  if (a.account?.activeRideId) await normalize(a, a.account.activeRideId);
+  const candidates = await candidateDrivers(qdoc.data()!.pickup, a.uid);
+  const id = admin().db.collection("rides").doc().id,
+    pinSecret = secret(id);
+  const result = await atomic(op, async (t) => {
+    const qr = admin().db.doc(`quotes/${quoteId}`),
+      q = await t.get(qr),
+      ur = admin().db.doc(`users/${a.uid}`),
+      u = await t.get(ur),
+      dr = await t.get(admin().db.doc(`drivers/${a.uid}`));
+    const quote = dto<Quote>(q),
+      user = dto<Account>(u);
+    ensure(
+      quote.riderId === a.uid,
+      404,
+      "NOT_FOUND",
+      "This quote is unavailable.",
+    );
+    ensure(
+      !quote.consumedByRideId,
+      409,
+      "QUOTE_USED",
+      "This quote already has a ride.",
+    );
+    ensure(
+      Date.parse(quote.expiresAt) > Date.now(),
+      410,
+      "QUOTE_EXPIRED",
+      "Your quote expired. Get a new fare.",
+    );
+    ensure(
+      !user.activeRideId,
+      409,
+      "ACTIVE_RIDE",
+      "Continue your active ride or payment first.",
+    );
+    ensure(
+      !dr.exists ||
+        (dr.data()?.availability === "offline" && !dr.data()?.activeRideId),
+      409,
+      "DRIVING_CONFLICT",
+      "Go offline and finish your driver trip before booking.",
+    );
+    t.create(admin().db.doc(`rides/${id}`), {
+      ...base(),
+      riderId: a.uid,
+      driverId: null,
+      vehicleId: null,
+      quoteId,
+      serviceAreaId: "bengaluru-demo",
+      rideType: "economy",
+      status: "searching",
+      paymentStatus: "not_due",
+      paymentId: null,
+      reviewId: null,
+      pickup: quote.pickup,
+      destination: quote.destination,
+      riderSnapshot: person(user),
+      distanceMeters: quote.distanceMeters,
+      durationSeconds: quote.durationSeconds,
+      fare: quote.fare,
+      finalFarePaise: null,
+      searchExpiresAt: future(120000),
+      candidateDriverIds: candidates,
+      dispatchStatus: "pending",
+      dispatchAttemptCount: 0,
+      trackingMode: null,
+      accessSyncVersion: 1,
+      accessSyncPending: false,
+      cancellationFeePaise: 0,
+      isDemo: user.isDemo,
+    });
+    t.create(admin().db.doc(`rideSecrets/${id}`), pinSecret);
+    t.update(qr, { consumedByRideId: id, ...updated(quote.version) });
+    t.update(ur, { activeRideId: id, ...updated(user.version) });
+    event(t, id, 1, "requested", a, null, "searching");
+    return { rideId: id, status: "searching" };
+  });
+  await dispatch(result.rideId);
+  return result;
+}
+export async function dispatch(id: string) {
+  const ref = admin().db.doc(`rides/${id}`),
+    doc = await ref.get();
+  if (
+    !doc.exists ||
+    doc.data()?.status !== "searching" ||
+    doc.data()?.dispatchStatus === "ready"
+  )
+    return;
+  const r = doc.data()!;
+  try {
+    await admin().db.runTransaction(async (t) => {
+      const current = await t.get(ref);
+      if (current.data()?.status !== "searching") return;
+      const refs = (r.candidateDriverIds as string[]).map((uid) =>
+          admin().db.doc(`drivers/${uid}/offers/${id}`),
+        ),
+        existing = refs.length ? await t.getAll(...refs) : [];
+      refs.forEach((o, i) => {
+        if (!existing[i].exists)
+          t.create(o, {
+            ...base(),
+            rideId: id,
+            driverId: r.candidateDriverIds[i],
+            rideVersion: r.version,
+            status: "open",
+            expiresAt: r.searchExpiresAt,
+            pickup: r.pickup,
+            destination: r.destination,
+            farePaise: r.fare.totalPaise,
+            distanceMeters: r.distanceMeters,
+            durationSeconds: r.durationSeconds,
+            pickupDistanceMeters: 0,
+            isDemo: r.isDemo,
+          });
+      });
+      t.update(ref, {
+        dispatchStatus: "ready",
+        dispatchAttemptCount: (r.dispatchAttemptCount ?? 0) + 1,
+      });
+    });
+  } catch {
+    await ref.update({ dispatchStatus: "error" });
+  }
+}
+export async function offers(a: Actor) {
+  role(a, "driver", true);
+  const driver = dto<Driver>(await admin().db.doc(`drivers/${a.uid}`).get());
+  if (
+    driver.approvalStatus !== "approved" ||
+    driver.availability !== "online" ||
+    driver.activeRideId
+  )
+    return { items: [], nextCursor: null };
+  const snap = await admin()
+    .db.collection(`drivers/${a.uid}/offers`)
+    .where("status", "==", "open")
+    .orderBy("expiresAt", "asc")
+    .limit(10)
+    .get();
+  const items: Offer[] = [];
+  for (const doc of snap.docs) {
+    const offer = dto<Offer>(doc),
+      r = await admin().db.doc(`rides/${offer.rideId}`).get();
+    if (
+      r.data()?.status === "searching" &&
+      r.data()?.searchExpiresAt.toMillis() > Date.now()
+    )
+      items.push({
+        ...offer,
+        rideVersion: r.data()!.version,
+        pickupDistanceMeters: driver.lastLocation
+          ? Math.round(distance(driver.lastLocation, offer.pickup))
+          : 0,
+      });
+  }
+  return { items, nextCursor: null };
+}
+export async function accept(op: Operation, id: string) {
+  const a = op.actor;
+  role(a, "driver", true);
+  const b = versionSchema.parse(op.body),
+    location = await fresh(a.uid, true);
+  const result = await atomic(op, async (t) => {
+    const db = admin().db,
+      rr = db.doc(`rides/${id}`),
+      dr = db.doc(`drivers/${a.uid}`),
+      or = db.doc(`drivers/${a.uid}/offers/${id}`),
+      [rd, dd, od, ud] = await t.getAll(rr, dr, or, db.doc(`users/${a.uid}`));
+    const r = dto<Ride>(rd),
+      d = dto<Driver>(dd),
+      u = dto<Account>(ud);
+    ensure(
+      od.exists && od.data()?.status === "open",
+      404,
+      "OFFER_UNAVAILABLE",
+      "This request is no longer available.",
+    );
+    ensure(
+      r.riderId !== a.uid,
+      403,
+      "OWN_RIDE",
+      "You cannot accept your own ride.",
+    );
+    checkVersion(r, b.expectedVersion);
+    ensure(
+      r.status === "searching" && Date.parse(r.searchExpiresAt) > Date.now(),
+      409,
+      "ALREADY_ACCEPTED",
+      "This request expired or another driver accepted.",
+    );
+    ensure(
+      d.approvalStatus === "approved" &&
+        d.availability === "online" &&
+        !d.activeRideId &&
+        !u.activeRideId,
+      409,
+      "DRIVER_UNAVAILABLE",
+      "You must be online and free before accepting.",
+    );
+    ensure(
+      Date.now() - location.timestamp <= 15000 &&
+        distance(location, r.pickup) <= 5000,
+      409,
+      "LOCATION_CHANGED",
+      "You are outside the pickup area or your location is stale.",
+    );
+    ensure(
+      d.activeVehicleId,
+      409,
+      "NO_VEHICLE",
+      "An approved vehicle is required.",
+    );
+    const [vdoc, rider] = await t.getAll(
+        db.doc(`vehicles/${d.activeVehicleId}`),
+        db.doc(`users/${r.riderId}`),
+      ),
+      v = dto<Vehicle>(vdoc);
+    ensure(
+      v.approvalStatus === "approved" &&
+        v.applicationVersion === d.applicationVersion &&
+        rider.data()?.activeRideId === id,
+      409,
+      "STATE_CHANGED",
+      "The request or vehicle changed.",
+    );
+    t.update(rr, {
+      ...updated(r.version),
+      driverId: a.uid,
+      vehicleId: v.id,
+      driverSnapshot: person(u),
+      vehicleSnapshot: v,
+      status: "assigned",
+      assignedAt: now(),
+      trackingMode: location.source,
+      accessSyncPending: true,
+    });
+    t.update(dr, {
+      ...updated(d.version),
+      availability: "busy",
+      activeRideId: id,
+    });
+    t.update(or, { status: "accepted", respondedAt: now() });
+    event(t, id, r.version + 1, "assigned", a, r.status, "assigned");
+    return { rideId: id, status: "assigned" };
+  });
+  await syncRide(id);
+  return result;
+}
+export async function decline(op: Operation, id: string) {
+  role(op.actor, "driver");
+  return atomic(op, async (t) => {
+    const ref = admin().db.doc(`drivers/${op.actor.uid}/offers/${id}`),
+      doc = await t.get(ref);
+    ensure(doc.exists, 404, "NOT_FOUND", "This offer is unavailable.");
+    t.update(ref, { status: "declined", respondedAt: now() });
+    return { declined: true };
+  });
+}
+export async function transition(op: Operation, id: string, action: string) {
+  const a = op.actor;
+  const b = versionSchema
+    .extend({
+      pin: z
+        .string()
+        .regex(/^\d{4}$/)
+        .optional(),
+      reason: z.string().min(5).max(64).optional(),
+      note: z.string().max(300).optional(),
+    })
+    .strict()
+    .parse(op.body);
+  await authorizeRide(a, id);
+  const result = await atomic(op, async (t) => {
+    const db = admin().db,
+      rr = db.doc(`rides/${id}`),
+      rd = await t.get(rr),
+      r = dto<Ride>(rd);
+    ensure(
+      r.riderId === a.uid || r.driverId === a.uid,
+      404,
+      "NOT_FOUND",
+      "This ride is unavailable.",
+    );
+    checkVersion(r, b.expectedVersion);
+    const ur = db.doc(`users/${r.riderId}`),
+      ud = await t.get(ur),
+      dr = r.driverId ? db.doc(`drivers/${r.driverId}`) : null,
+      dd = dr ? await t.get(dr) : null,
+      sref = db.doc(`rideSecrets/${id}`),
+      sd = action === "start" ? await t.get(sref) : null;
+    let target = r.status;
+    if (action === "cancel") {
+      ensure(
+        canCancel(r.status),
+        409,
+        "CANNOT_CANCEL",
+        "This ride can no longer be cancelled.",
+      );
+      ensure(
+        b.reason,
+        422,
+        "REASON_REQUIRED",
+        "Choose a reason for cancellation.",
+      );
+      if (r.driverId === a.uid && b.reason === "other")
+        ensure(
+          b.note && b.note.length >= 5,
+          422,
+          "NOTE_REQUIRED",
+          "Explain why you need to cancel.",
+        );
+      target = "cancelled";
+    } else {
+      role(a, "driver", true);
+      ensure(
+        r.driverId === a.uid,
+        404,
+        "NOT_FOUND",
+        "This trip is unavailable.",
+      );
+      const required = {
+        arrive: "assigned",
+        start: "arrived",
+        complete: "in_progress",
+      }[action];
+      ensure(
+        required && r.status === required,
+        409,
+        "INVALID_TRANSITION",
+        "The trip stage changed. Refresh before continuing.",
+      );
+      if (action === "start") {
+        ensure(
+          sd?.exists && b.pin && matches(id, b.pin, sd.data()!.pinHmac),
+          422,
+          "INVALID_PIN",
+          "The trip PIN does not match. Ask the passenger and try again.",
+        );
+        target = "in_progress";
+      } else target = action === "arrive" ? "arrived" : "completed";
+    }
+    const update: Record<string, unknown> = {
+      ...updated(r.version),
+      status: target,
+      accessSyncPending: true,
+    };
+    if (action === "arrive") update.arrivedAt = now();
+    if (action === "start") {
+      update.startedAt = now();
+      t.delete(sref);
+    }
+    if (action === "cancel") {
+      Object.assign(update, {
+        cancelledAt: now(),
+        cancelledBy: a.uid,
+        cancelledByRole: a.uid === r.riderId ? "rider" : "driver",
+        cancellationReason: b.reason,
+        cancellationNote: b.note ?? "",
+      });
+      if (ud.data()?.activeRideId === id)
+        t.update(ur, { activeRideId: null, updatedAt: now() });
+      t.delete(sref);
+    }
+    if (action === "complete") {
+      Object.assign(update, {
+        completedAt: now(),
+        paymentStatus: "pending",
+        paymentId: id,
+        finalFarePaise: r.fare.totalPaise,
+      });
+      const platformSharePaise = Math.round(
+        (r.fare.totalPaise * r.fare.commissionBps) / 10000,
+      );
+      t.create(db.doc(`payments/${id}`), {
+        ...base(),
+        rideId: id,
+        riderId: r.riderId,
+        driverId: r.driverId,
+        provider: "razorpay",
+        mode: "test",
+        amountPaise: r.fare.totalPaise,
+        currency: "INR",
+        status: "pending",
+        orderCreationState: "not_started",
+        providerReceipt: `safar_${id}`,
+        providerOrderId: null,
+        capturedPaymentId: null,
+        receiptId: null,
+        driverSharePaise: r.fare.totalPaise - platformSharePaise,
+        platformSharePaise,
+        isDemo: rd.data()!.isDemo,
+      });
+    }
+    if ((action === "cancel" || action === "complete") && dr && dd?.exists)
+      t.update(dr, {
+        activeRideId: null,
+        availability: "offline",
+        ...updated(dd.data()!.version),
+      });
+    t.update(rr, update);
+    event(
+      t,
+      id,
+      r.version + 1,
+      action === "start"
+        ? "started"
+        : action === "complete"
+          ? "completed"
+          : target,
+      a,
+      r.status,
+      target,
+    );
+    return { rideId: id, status: target };
+  });
+  await syncRide(id);
+  return result;
+}
+export async function pin(a: Actor, id: string) {
+  const doc = await authorizeRide(a, id),
+    r = dto<Ride>(doc);
+  ensure(
+    r.riderId === a.uid && ["assigned", "arrived"].includes(r.status),
+    404,
+    "PIN_UNAVAILABLE",
+    "The trip PIN is unavailable at this stage.",
+  );
+  const s = await admin().db.doc(`rideSecrets/${id}`).get();
+  ensure(s.exists, 404, "PIN_UNAVAILABLE", "Trip verification is unavailable.");
+  return {
+    pin: reveal(
+      s.data() as { pinCiphertext: string; pinNonce: string; pinTag: string },
+    ),
+  };
+}
+export async function history(
+  a: Actor,
+  workspace: string,
+  status: string | null,
+  cursor: string | null,
+) {
+  role(a, workspace === "driver" ? "driver" : "rider");
+  let q = admin()
+    .db.collection("rides")
+    .where(workspace === "driver" ? "driverId" : "riderId", "==", a.uid);
+  if (status === "completed") q = q.where("status", "==", "completed");
+  if (status === "cancelled")
+    q = q.where("status", "in", ["cancelled", "expired"]);
+  const p = await page<Ride>(
+    q,
+    `${a.uid}:rides:${workspace}:${status}`,
+    cursor,
+  );
+  return {
+    ...p,
+    items: p.items.map((r) => {
+      const safe = { ...r } as Ride & { candidateDriverIds?: string[] };
+      delete safe.candidateDriverIds;
+      return safe;
+    }),
+  };
+}
+export async function review(op: Operation, id: string) {
+  const a = op.actor,
+    b = z
+      .object({
+        stars: z.number().int().min(1).max(5),
+        comment: z.string().max(500).default(""),
+      })
+      .strict()
+      .parse(op.body);
+  return atomic(op, async (t) => {
+    const rr = admin().db.doc(`rides/${id}`),
+      rd = await t.get(rr),
+      r = dto<Ride>(rd);
+    ensure(
+      r.riderId === a.uid && r.status === "completed",
+      404,
+      "NOT_FOUND",
+      "This completed ride is unavailable.",
+    );
+    const ref = admin().db.doc(`reviews/${id}`),
+      old = await t.get(ref),
+      dr = admin().db.doc(`drivers/${r.driverId}`),
+      dd = await t.get(dr);
+    ensure(
+      !old.exists,
+      409,
+      "ALREADY_REVIEWED",
+      "You already rated this ride.",
+    );
+    t.create(ref, {
+      schemaVersion: 1,
+      createdAt: now(),
+      rideId: id,
+      riderId: a.uid,
+      driverId: r.driverId,
+      ...b,
+      isDemo: rd.data()!.isDemo,
+    });
+    t.update(rr, { reviewId: id, ...updated(r.version) });
+    t.update(dr, {
+      ratingSum: dd.data()!.ratingSum + b.stars,
+      ratingCount: dd.data()!.ratingCount + 1,
+    });
+    return { saved: true };
+  });
+}

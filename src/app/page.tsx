@@ -1,5 +1,155 @@
-import Link from 'next/link';
-import {MapPin,ShieldCheck,ReceiptText,CarFront,Route,Compass,ChevronRight} from 'lucide-react';
-import {Brand} from '@/components/ui';
-import {CityMap} from '@/components/map-loader';
-export default function Home(){return <><header className="public-header"><Brand/><nav aria-label="Main navigation"><a href="#how-it-works">How it works</a><Link href="/sign-up?intent=driver">Drive with Safar</Link><Link href="/sign-in" className="nav-sign-in">Sign in<ChevronRight size={16}/></Link></nav></header><main id="main"><section className="hero"><div className="hero-copy"><span className="location-label"><MapPin size={16}/>Made for Bengaluru</span><h1>Your city.<br/>Your journey.</h1><p className="hero-description">A familiar route. A new possibility.<br/>Wherever today takes you, go with Safar.</p><div className="hero-actions"><Link className="button primary" href="/sign-up?intent=rider"><CarFront size={20}/>Book a ride</Link><Link className="button secondary" href="/sign-up?intent=driver">Become a driver</Link></div><div className="hero-note"><ShieldCheck size={17}/><span>Fixed fare. Clear journey. One simple booking.</span></div></div><div className="hero-map"><CityMap publicMap/><div className="map-city-tag"><span className="brand-symbol"><Compass size={23}/></span><div><strong>Bengaluru</strong><small>Your next journey starts here</small></div></div><div className="map-area-note"><MapPin size={15}/>Service area preview · Central Bengaluru</div><div className="hero-map-caption"><span>Explore the city at your own pace.</span><span className="caption-coordinates">12.9716° N / 77.5946° E</span></div></div></section><div className="public-demo"><span className="demo-pill">Controlled release</span><p>Explore Safar with test payments. No real money is collected.</p><Link href="/terms">About this release<ChevronRight size={16}/></Link></div><section className="how-section" id="how-it-works"><div className="section-intro"><h2>Less to think about.<br/>More places to be.</h2><p>From the first pin to the final stop,<br/>keep every part of your journey in view.</p></div><div className="how-grid">{[{icon:MapPin,title:'A place to start',text:'Choose your pickup and destination. Review the road route and your fixed fare before requesting.'},{icon:Route,title:'A journey in view',text:'Know your driver, follow trip progress, and share your trip PIN when you are ready to go.'},{icon:ReceiptText,title:'A clear finish',text:'Complete a test payment, download your receipt, and find every ride in your activity.'}].map(({icon:Icon,title,text})=><article key={title}><span className="feature-icon"><Icon size={27} strokeWidth={1.5}/></span><h3>{title}</h3><p>{text}</p></article>)}</div></section><section className="drive-strip"><div><CarFront size={35} strokeWidth={1.4}/><h2>Take the driver’s seat.</h2><p>Apply with your vehicle and manage trips in one calm workspace.</p></div><Link className="button secondary" href="/sign-up?intent=driver">Drive with Safar<ChevronRight size={17}/></Link></section></main><footer className="public-footer"><Brand/><span>A little closer to where you want to be.</span><nav><Link href="/privacy">Privacy</Link><Link href="/terms">Terms</Link></nav><small>© {new Date().getFullYear()} Safar</small></footer></>;}
+import Link from "next/link";
+import {
+  MapPin,
+  ShieldCheck,
+  ReceiptText,
+  CarFront,
+  Route,
+  Compass,
+  ChevronRight,
+} from "lucide-react";
+import { Brand } from "@/components/ui";
+import { CityMap } from "@/components/map-loader";
+export default function Home() {
+  return (
+    <>
+      <header className="public-header">
+        <Brand />
+        <nav aria-label="Main navigation">
+          <a href="#how-it-works">How it works</a>
+          <Link href="/sign-up?intent=driver">Drive with Safar</Link>
+          <Link href="/sign-in" className="nav-sign-in">
+            Sign in
+            <ChevronRight size={16} />
+          </Link>
+        </nav>
+      </header>
+      <main id="main">
+        <section className="hero">
+          <div className="hero-copy">
+            <span className="location-label">
+              <MapPin size={16} />
+              Made for Bengaluru
+            </span>
+            <h1>
+              Your city.
+              <br />
+              Your journey.
+            </h1>
+            <p className="hero-description">
+              A familiar route. A new possibility.
+              <br />
+              Wherever today takes you, go with Safar.
+            </p>
+            <div className="hero-actions">
+              <Link className="button primary" href="/sign-up?intent=rider">
+                <CarFront size={20} />
+                Book a ride
+              </Link>
+              <Link className="button secondary" href="/sign-up?intent=driver">
+                Become a driver
+              </Link>
+            </div>
+            <div className="hero-note">
+              <ShieldCheck size={17} />
+              <span>Fixed fare. Clear journey. One simple booking.</span>
+            </div>
+          </div>
+          <div className="hero-map">
+            <CityMap publicMap />
+            <div className="map-city-tag">
+              <span className="brand-symbol">
+                <Compass size={23} />
+              </span>
+              <div>
+                <strong>Bengaluru</strong>
+                <small>Your next journey starts here</small>
+              </div>
+            </div>
+            <div className="map-area-note">
+              <MapPin size={15} />
+              Service area preview · Central Bengaluru
+            </div>
+            <div className="hero-map-caption">
+              <span>Explore the city at your own pace.</span>
+              <span className="caption-coordinates">
+                12.9716° N / 77.5946° E
+              </span>
+            </div>
+          </div>
+        </section>
+        <div className="public-demo">
+          <span className="demo-pill">Controlled release</span>
+          <p>Explore Safar with test payments. No real money is collected.</p>
+          <Link href="/terms">
+            About this release
+            <ChevronRight size={16} />
+          </Link>
+        </div>
+        <section className="how-section" id="how-it-works">
+          <div className="section-intro">
+            <h2>
+              Less to think about.
+              <br />
+              More places to be.
+            </h2>
+            <p>
+              From the first pin to the final stop,
+              <br />
+              keep every part of your journey in view.
+            </p>
+          </div>
+          <div className="how-grid">
+            {[
+              {
+                icon: MapPin,
+                title: "A place to start",
+                text: "Choose your pickup and destination. Review the road route and your fixed fare before requesting.",
+              },
+              {
+                icon: Route,
+                title: "A journey in view",
+                text: "Know your driver, follow trip progress, and share your trip PIN when you are ready to go.",
+              },
+              {
+                icon: ReceiptText,
+                title: "A clear finish",
+                text: "Complete a test payment, download your receipt, and find every ride in your activity.",
+              },
+            ].map(({ icon: Icon, title, text }) => (
+              <article key={title}>
+                <span className="feature-icon">
+                  <Icon size={27} strokeWidth={1.5} />
+                </span>
+                <h3>{title}</h3>
+                <p>{text}</p>
+              </article>
+            ))}
+          </div>
+        </section>
+        <section className="drive-strip">
+          <div>
+            <CarFront size={35} strokeWidth={1.4} />
+            <h2>Take the driver’s seat.</h2>
+            <p>
+              Apply with your vehicle and manage trips in one calm workspace.
+            </p>
+          </div>
+          <Link className="button secondary" href="/sign-up?intent=driver">
+            Drive with Safar
+            <ChevronRight size={17} />
+          </Link>
+        </section>
+      </main>
+      <footer className="public-footer">
+        <Brand />
+        <span>A little closer to where you want to be.</span>
+        <nav>
+          <Link href="/privacy">Privacy</Link>
+          <Link href="/terms">Terms</Link>
+        </nav>
+        <small>© {new Date().getFullYear()} Safar</small>
+      </footer>
+    </>
+  );
+}

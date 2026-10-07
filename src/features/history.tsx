@@ -1,10 +1,148 @@
-'use client';
-import Link from 'next/link';
-import {useState} from 'react';
-import {Clock3,CarFront,ChevronRight} from 'lucide-react';
-import {money,date,type Ride,type Page,type Role} from '@/contracts';
-import {api} from '@/components/auth-provider';
-import {Heading,Loading,Banner,Empty,Button,Status} from '@/components/ui';
-import {useResource} from '@/lib/hooks';
-export function RideRows({items,workspace}:{items:Ride[];workspace:Role}){return <div className="ride-list">{items.map(r=><Link key={r.id} className="ride-row" href={`/${workspace}/rides/${r.id}`}><span className="ride-row-icon"><CarFront size={23}/></span><div className="ride-row-main"><strong>{r.pickup.label.split(',')[0]} to {r.destination.label.split(',')[0]}</strong><p>{date(r.createdAt)} · Economy</p></div><div className="ride-row-side">{!['cancelled','expired'].includes(r.status)&&<strong>{money(r.fare.totalPaise)}</strong>}<div className="badges"><Status value={r.status}/>{r.status==='completed'&&<Status value={r.paymentStatus}/>}</div></div><ChevronRight size={18} className="muted"/></Link>)}</div>;}
-export function History({workspace}:{workspace:Role}){const [filter,setFilter]=useState('all'),[extra,setExtra]=useState<Ride[]>([]),[cursor,setCursor]=useState<string|null>(null),[more,setMore]=useState(false),[error,setError]=useState('');const path=`rides?role=${workspace}&status=${filter}`,r=useResource<Page<Ride>>(path);async function load(){setMore(true);setError('');try{const p=await api<Page<Ride>>(`${path}&cursor=${encodeURIComponent(cursor??r.data!.nextCursor!)}`);setExtra([...extra,...p.items]);setCursor(p.nextCursor);}catch(e){setError(e instanceof Error?e.message:'Unable to load more rides.');}finally{setMore(false);}}const items=[...r.data?.items??[],...extra];return <><Heading title="Your journeys" description="Every ride, from the first pin to the final stop."/><div className="tabs" aria-label="Filter rides">{['all','completed','cancelled'].map(f=><button key={f} className={filter===f?'active':''} onClick={()=>{setFilter(f);setExtra([]);setCursor(null);}}>{f[0].toUpperCase()+f.slice(1)}</button>)}</div>{r.loading?<Loading/>:r.error?<Banner kind="error">{r.error}<Button variant="ghost" onClick={r.refresh}>Retry</Button></Banner>:items.length?<RideRows items={items} workspace={workspace}/>:<Empty icon={Clock3} title={filter==='all'?'Your rides will appear here':'No rides in this view'} action={filter==='all'?<Link className="button primary" href={`/${workspace}`}>{workspace==='driver'?'Open driver dashboard':'Book a ride'}</Link>:<Button variant="secondary" onClick={()=>setFilter('all')}>Show all rides</Button>}>Your activity keeps a record of your journeys and their payment status.</Empty>}{error&&<Banner kind="error">{error}</Banner>}{(extra.length?cursor:r.data?.nextCursor)&&<div className="load-more"><Button variant="secondary" busy={more} onClick={load}>Load more</Button></div>}</>;}
+"use client";
+import Link from "next/link";
+import { useState } from "react";
+import { Clock3, CarFront, ChevronRight } from "lucide-react";
+import { money, date, type Ride, type Page, type Role } from "@/contracts";
+import { api } from "@/components/auth-provider";
+import {
+  Heading,
+  Loading,
+  Banner,
+  Empty,
+  Button,
+  Status,
+} from "@/components/ui";
+import { useResource } from "@/lib/hooks";
+export function RideRows({
+  items,
+  workspace,
+}: {
+  items: Ride[];
+  workspace: Role;
+}) {
+  return (
+    <div className="ride-list">
+      {items.map((r) => (
+        <Link
+          key={r.id}
+          className="ride-row"
+          href={`/${workspace}/rides/${r.id}`}
+        >
+          <span className="ride-row-icon">
+            <CarFront size={23} />
+          </span>
+          <div className="ride-row-main">
+            <strong>
+              {r.pickup.label.split(",")[0]} to{" "}
+              {r.destination.label.split(",")[0]}
+            </strong>
+            <p>{date(r.createdAt)} · Economy</p>
+          </div>
+          <div className="ride-row-side">
+            {!["cancelled", "expired"].includes(r.status) && (
+              <strong>{money(r.fare.totalPaise)}</strong>
+            )}
+            <div className="badges">
+              <Status value={r.status} />
+              {r.status === "completed" && <Status value={r.paymentStatus} />}
+            </div>
+          </div>
+          <ChevronRight size={18} className="muted" />
+        </Link>
+      ))}
+    </div>
+  );
+}
+export function History({ workspace }: { workspace: Role }) {
+  const [filter, setFilter] = useState("all"),
+    [extra, setExtra] = useState<Ride[]>([]),
+    [cursor, setCursor] = useState<string | null>(null),
+    [more, setMore] = useState(false),
+    [error, setError] = useState("");
+  const path = `rides?role=${workspace}&status=${filter}`,
+    r = useResource<Page<Ride>>(path);
+  async function load() {
+    setMore(true);
+    setError("");
+    try {
+      const p = await api<Page<Ride>>(
+        `${path}&cursor=${encodeURIComponent(cursor ?? r.data!.nextCursor!)}`,
+      );
+      setExtra([...extra, ...p.items]);
+      setCursor(p.nextCursor);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Unable to load more rides.");
+    } finally {
+      setMore(false);
+    }
+  }
+  const items = [...(r.data?.items ?? []), ...extra];
+  return (
+    <>
+      <Heading
+        title="Your journeys"
+        description="Every ride, from the first pin to the final stop."
+      />
+      <div className="tabs" aria-label="Filter rides">
+        {["all", "completed", "cancelled"].map((f) => (
+          <button
+            key={f}
+            className={filter === f ? "active" : ""}
+            onClick={() => {
+              setFilter(f);
+              setExtra([]);
+              setCursor(null);
+            }}
+          >
+            {f[0].toUpperCase() + f.slice(1)}
+          </button>
+        ))}
+      </div>
+      {r.loading ? (
+        <Loading />
+      ) : r.error ? (
+        <Banner kind="error">
+          {r.error}
+          <Button variant="ghost" onClick={r.refresh}>
+            Retry
+          </Button>
+        </Banner>
+      ) : items.length ? (
+        <RideRows items={items} workspace={workspace} />
+      ) : (
+        <Empty
+          icon={Clock3}
+          title={
+            filter === "all"
+              ? "Your rides will appear here"
+              : "No rides in this view"
+          }
+          action={
+            filter === "all" ? (
+              <Link className="button primary" href={`/${workspace}`}>
+                {workspace === "driver"
+                  ? "Open driver dashboard"
+                  : "Book a ride"}
+              </Link>
+            ) : (
+              <Button variant="secondary" onClick={() => setFilter("all")}>
+                Show all rides
+              </Button>
+            )
+          }
+        >
+          Your activity keeps a record of your journeys and their payment
+          status.
+        </Empty>
+      )}
+      {error && <Banner kind="error">{error}</Banner>}
+      {(extra.length ? cursor : r.data?.nextCursor) && (
+        <div className="load-more">
+          <Button variant="secondary" busy={more} onClick={load}>
+            Load more
+          </Button>
+        </div>
+      )}
+    </>
+  );
+}

@@ -1,17 +1,634 @@
-'use client';
-import Link from 'next/link';
-import {useState,type FormEvent} from 'react';
-import {useRouter} from 'next/navigation';
-import {UsersRound,CarFront,LifeBuoy,CreditCard,FlaskConical} from 'lucide-react';
-import {Heading,Button,Banner,Loading,Empty,Status,Modal,Endpoints,Steps} from '@/components/ui';
-import {useResource,useMutation} from '@/lib/hooks';
-import {api} from '@/components/auth-provider';
-import {money,date,label,type Driver,type Ride,type Page,type Payment} from '@/contracts';
-import {RideRows} from './history';
-import {FareBreakdown} from './booking';
-export function AdminOverview(){const r=useResource<{applications:number;activeRides:number;paymentAttention:number;openTickets:number}>('admin/overview',15000);return <><Heading title="A clear view of Safar." description="Driver approvals, ride attention and support in one place."/>{r.loading?<Loading/>:r.error?<Banner kind="error">{r.error}<Button onClick={r.refresh}>Retry</Button></Banner>:<div className="overview-grid">{[{key:'applications',title:'Pending applications',icon:UsersRound,href:'/admin/drivers'},{key:'activeRides',title:'Active rides',icon:CarFront,href:'/admin/rides?status=active'},{key:'paymentAttention',title:'Payment attention',icon:CreditCard,href:'/admin/rides?status=attention'},{key:'openTickets',title:'Open support requests',icon:LifeBuoy,href:'/admin/support?status=open'}].map(c=><Link className="metric" href={c.href} key={c.key}><c.icon size={23} className="muted"/><strong>{r.data?.[c.key as keyof typeof r.data]??'—'}</strong><p>{c.title}</p></Link>)}</div>}<div className="notice-panel"><h3>Controlled release operations</h3><p>Driver approvals are versioned. Financial records change only after provider verification. Test receipts and earnings remain auditable.</p></div><section className="workspace-section"><h2 style={{fontSize:22,marginBottom:20}}>Start with what needs you.</h2><div className="help-grid"><Link className="help-card panel" href="/admin/drivers"><UsersRound size={26}/><h3>Review drivers</h3><p>Inspect applications and the exact vehicle version before approval.</p></Link><Link className="help-card panel" href="/admin/rides"><CarFront size={26}/><h3>Inspect rides</h3><p>Review trip stages, locked fares and payment attention.</p></Link><Link className="help-card panel" href="/admin/support"><LifeBuoy size={26}/><h3>Respond to support</h3><p>Keep replies and resolution in the saved conversation.</p></Link></div></section></>;}
-export function DriverQueue(){const [status,setStatus]=useState('pending'),[exact,setExact]=useState(''),[search,setSearch]=useState(''),[extra,setExtra]=useState<Driver[]>([]),[cursor,setCursor]=useState<string|null>(null),m=useMutation();const path=`admin/drivers?status=${status}${exact?`&exact=${encodeURIComponent(exact)}`:''}`,r=useResource<Page<Driver>>(path);async function more(){await m.run<Page<Driver>>(`${path}&cursor=${encodeURIComponent(cursor??r.data!.nextCursor!)}`,undefined,p=>{setExtra([...extra,...p.items]);setCursor(p.nextCursor);},'GET');}const rows=[...r.data?.items??[],...extra];return <><Heading title="The people behind each journey." description="Review driver applications and their submitted vehicles."/><div className="tabs">{['pending','approved','rejected','suspended'].map(s=><button key={s} className={status===s?'active':''} onClick={()=>{setStatus(s);setExtra([]);setCursor(null);setExact('');}}>{label(s)}</button>)}</div><form className="admin-search" onSubmit={e=>{e.preventDefault();setExact(search);setExtra([]);}}><input aria-label="Exact plate or driver UID" placeholder="Exact registration or driver UID" value={search} onChange={e=>setSearch(e.target.value)}/><Button variant="secondary">Search</Button>{exact&&<Button type="button" variant="ghost" onClick={()=>{setExact('');setSearch('');}}>Clear</Button>}</form>{r.loading?<Loading/>:r.error?<Banner kind="error">{r.error}<Button onClick={r.refresh}>Retry</Button></Banner>:rows.length?<div className="table-wrap"><table><thead><tr><th>Driver</th><th>Vehicle</th><th>Registration</th><th>Status</th><th>Review</th></tr></thead><tbody>{rows.map(d=><tr key={d.id}><td data-label="Driver"><div><strong>{d.displayName}</strong><small>Application v{d.applicationVersion}</small></div></td><td data-label="Vehicle">{d.vehicle?.make} {d.vehicle?.model}</td><td data-label="Registration">{d.vehicle?.plate}</td><td data-label="Status"><Status value={d.approvalStatus}/></td><td data-label="Review"><Link className="text-link" href={`/admin/drivers/${d.uid}`}>Review application</Link></td></tr>)}</tbody></table></div>:<Empty icon={UsersRound} title="No applications in this queue">Submitted driver applications will appear here for review.</Empty>}{(extra.length?cursor:r.data?.nextCursor)&&<div className="load-more"><Button variant="secondary" busy={m.busy} onClick={more}>Load more</Button></div>}{m.error&&<Banner kind="error">{m.error}</Banner>}</>;}
-export function DriverReview({uid}:{uid:string}){const r=useResource<Driver>(`admin/drivers/${uid}`),m=useMutation(),router=useRouter(),[decision,setDecision]=useState<string|null>(null),[reason,setReason]=useState('');if(r.loading)return <Loading/>;if(!r.data)return <Banner kind="error">{r.error}</Banner>;const d=r.data;return <div className="form-page"><Link className="back-link" href="/admin/drivers">Back to applications</Link><Heading title={d.displayName??'Driver application'} description={`Submitted application version ${d.applicationVersion}`}/><section className="panel"><Status value={d.approvalStatus}/><dl className="receipt-details">{[['Vehicle',`${d.vehicle?.make} ${d.vehicle?.model}`],['Registration',d.vehicle?.plate??''],['Colour',d.vehicle?.color??''],['Passenger seats',String(d.vehicle?.seats??4)],['Application version',String(d.applicationVersion)]].map(([title,value])=><div key={title}><dt>{title}</dt><dd>{value}</dd></div>)}</dl>{d.reviewReason&&<Banner kind="warning">{d.reviewReason}</Banner>}{m.error&&<Banner kind="error">{m.error}</Banner>}<div className="action-stack">{d.approvalStatus==='pending'&&<><Button onClick={()=>setDecision('approve')}>Approve driver</Button><Button variant="secondary" onClick={()=>setDecision('reject')}>Reject application</Button></>}{d.approvalStatus==='approved'&&<Button variant="secondary" onClick={()=>setDecision('suspend')}>Suspend driver</Button>}</div></section><Modal open={!!decision} onOpenChange={o=>!o&&setDecision(null)} title={`${label(decision??'approve')} this driver?`} description={`This decision applies to ${d.vehicle?.plate}, application version ${d.applicationVersion}.`}>{decision!=='approve'&&<div className="field"><label htmlFor="decision-reason">Reason</label><textarea id="decision-reason" value={reason} onChange={e=>setReason(e.target.value)} minLength={5} maxLength={500} required/></div>}{m.error&&<Banner kind="error">{m.error}</Banner>}<div className="dialog-actions"><Button variant="secondary" onClick={()=>setDecision(null)}>Cancel</Button><Button variant={decision==='approve'?'primary':'danger'} busy={m.busy} disabled={decision!=='approve'&&reason.trim().length<5} onClick={()=>m.run(`admin/drivers/${uid}/decision`,{decision,reason,applicationVersion:d.applicationVersion,expectedVersion:d.version},()=>{setDecision(null);router.push('/admin/drivers');})}>Confirm {decision}</Button></div></Modal></div>;}
-export function AdminRides({initial='all'}:{initial?:string}){const [status,setStatus]=useState(initial),[exact,setExact]=useState(''),[search,setSearch]=useState(''),[extra,setExtra]=useState<Ride[]>([]),[cursor,setCursor]=useState<string|null>(null),m=useMutation(),path=`admin/rides?status=${status}${exact?`&exact=${encodeURIComponent(exact)}`:''}`,r=useResource<Page<Ride>>(path);async function more(){await m.run<Page<Ride>>(`${path}&cursor=${encodeURIComponent(cursor??r.data!.nextCursor!)}`,undefined,p=>{setExtra([...extra,...p.items]);setCursor(p.nextCursor);},'GET');}const rows=[...r.data?.items??[],...extra];return <><Heading title="Every journey, accounted for." description="Inspect canonical trip and payment records."/><div className="tabs">{[['all','All'],['searching','Searching'],['active','Active'],['completed','Completed'],['cancelled','Cancelled'],['attention','Payment attention']].map(([key,title])=><button key={key} className={status===key?'active':''} onClick={()=>{setStatus(key);setExtra([]);setCursor(null);setExact('');}}>{title}</button>)}</div><form className="admin-search" onSubmit={e=>{e.preventDefault();setExact(search);setExtra([]);}}><input aria-label="Exact ride ID" placeholder="Search exact ride ID" value={search} onChange={e=>setSearch(e.target.value)}/><Button variant="secondary">Search</Button>{exact&&<Button type="button" variant="ghost" onClick={()=>{setExact('');setSearch('');}}>Clear</Button>}</form>{r.loading?<Loading/>:r.error?<Banner kind="error">{r.error}<Button onClick={r.refresh}>Retry</Button></Banner>:rows.length?<RideRows items={rows} workspace="admin"/>:<Empty icon={CarFront} title="No rides in this view">Ride records will appear as passengers request journeys.</Empty>}{(extra.length?cursor:r.data?.nextCursor)&&<div className="load-more"><Button variant="secondary" busy={m.busy} onClick={more}>Load more</Button></div>}</>;}
-export function RideInspection({id}:{id:string}){const r=useResource<Ride>(`rides/${id}`,10000),m=useMutation();if(r.loading)return <Loading/>;if(!r.data)return <Banner kind="error">{r.error}</Banner>;const ride=r.data;return <div className="payment-layout"><Link className="back-link" href="/admin/rides">Back to rides</Link><Heading title="Ride inspection" description={id}/><section className="panel"><div className="badges"><Status value={ride.status}/><Status value={ride.paymentStatus}/></div><Endpoints pickup={ride.pickup.label} destination={ride.destination.label}/><FareBreakdown quote={ride}/><dl className="receipt-details"><div><dt>Passenger</dt><dd>{ride.riderSnapshot.displayName}</dd></div><div><dt>Driver</dt><dd>{ride.driverSnapshot?.displayName??'Unassigned'}</dd></div><div><dt>Created</dt><dd>{date(ride.createdAt)}</dd></div><div><dt>Version</dt><dd>{ride.version}</dd></div><div><dt>Tracking access</dt><dd>{ride.accessSyncPending?'Sync pending':'Synchronized'}</dd></div><div><dt>Provider order</dt><dd>{ride.payment?.providerOrderId??'Not created'}</dd></div><div><dt>Captured payment</dt><dd>{ride.payment?.capturedPaymentId??'Not captured'}</dd></div></dl><h3 style={{marginTop:28,fontSize:18}}>Recorded events</h3><div className="receipt-details">{ride.events?.map((e,i)=><div key={i}><span>{label(e.eventType)}</span><small className="muted">{date(e.createdAt)}</small></div>)}</div>{m.error&&<Banner kind="error">{m.error}</Banner>}<div className="action-stack"><Button variant="secondary" busy={m.busy} onClick={()=>m.run(`admin/rides/${id}/reconcile`,{},r.refresh)}>Reconcile status</Button><Link className="text-link" href={`/admin/help/new?ride=${id}&category=payment`}>Open support ticket</Link></div><p className="compact-note">Payment verification checks the provider. Financial status cannot be manually marked paid.</p></section></div>;}
-export function DemoTools(){const m=useMutation(),[ids,setIds]=useState(''),[open,setOpen]=useState(false),[confirmation,setConfirmation]=useState(''),[result,setResult]=useState('');return <div className="form-page"><Heading title="Controlled demo tools" description="Use separate passenger and driver identities in two browsers."/><section className="panel"><FlaskConical size={32} className="muted"/><h2 style={{marginTop:20}}>Walk through a real workflow</h2><p className="compact-note">A passenger gets a quote and requests a ride. An approved, allowlisted driver uses an explicitly simulated location, accepts, arrives, enters the passenger’s PIN, starts and completes the trip. The passenger finishes a provider-backed test payment.</p><Banner kind="warning">Reset accepts only unpaid terminal demo records. Active rides and captured payment history are protected.</Banner><div className="field"><label htmlFor="demo-ids">Exact demo ride IDs (one per line)</label><textarea id="demo-ids" value={ids} onChange={e=>setIds(e.target.value)}/></div><Button variant="secondary" disabled={!ids.trim()} onClick={()=>setOpen(true)}>Reset terminal demo fixtures</Button>{result&&<Banner kind="success">{result}</Banner>}{m.error&&<Banner kind="error">{m.error}</Banner>}</section><Modal open={open} onOpenChange={setOpen} title="Reset these unpaid demo rides?" description={ids}><div className="field"><label htmlFor="reset-confirmation">Type RESET DEMO</label><input id="reset-confirmation" value={confirmation} onChange={e=>setConfirmation(e.target.value)}/></div><div className="dialog-actions"><Button variant="secondary" onClick={()=>setOpen(false)}>Keep records</Button><Button variant="danger" busy={m.busy} disabled={confirmation!=='RESET DEMO'} onClick={()=>m.run<{resetCount:number}>('admin/demo/reset',{confirmation,rideIds:ids.split('\n').map(s=>s.trim()).filter(Boolean)},r=>{setOpen(false);setResult(`${r.resetCount} unpaid demo records reset.`);})}>Confirm reset</Button></div></Modal></div>;}
+"use client";
+import Link from "next/link";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import {
+  UsersRound,
+  CarFront,
+  LifeBuoy,
+  CreditCard,
+  FlaskConical,
+} from "lucide-react";
+import {
+  Heading,
+  Button,
+  Banner,
+  Loading,
+  Empty,
+  Status,
+  Modal,
+  Endpoints,
+} from "@/components/ui";
+import { useResource, useMutation } from "@/lib/hooks";
+import { date, label, type Driver, type Ride, type Page } from "@/contracts";
+import { RideRows } from "./history";
+import { FareBreakdown } from "./booking";
+export function AdminOverview() {
+  const r = useResource<{
+    applications: number;
+    activeRides: number;
+    paymentAttention: number;
+    openTickets: number;
+  }>("admin/overview", 15000);
+  return (
+    <>
+      <Heading
+        title="A clear view of Safar."
+        description="Driver approvals, ride attention and support in one place."
+      />
+      {r.loading ? (
+        <Loading />
+      ) : r.error ? (
+        <Banner kind="error">
+          {r.error}
+          <Button onClick={r.refresh}>Retry</Button>
+        </Banner>
+      ) : (
+        <div className="overview-grid">
+          {[
+            {
+              key: "applications",
+              title: "Pending applications",
+              icon: UsersRound,
+              href: "/admin/drivers",
+            },
+            {
+              key: "activeRides",
+              title: "Active rides",
+              icon: CarFront,
+              href: "/admin/rides?status=active",
+            },
+            {
+              key: "paymentAttention",
+              title: "Payment attention",
+              icon: CreditCard,
+              href: "/admin/rides?status=attention",
+            },
+            {
+              key: "openTickets",
+              title: "Open support requests",
+              icon: LifeBuoy,
+              href: "/admin/support?status=open",
+            },
+          ].map((c) => (
+            <Link className="metric" href={c.href} key={c.key}>
+              <c.icon size={23} className="muted" />
+              <strong>{r.data?.[c.key as keyof typeof r.data] ?? "—"}</strong>
+              <p>{c.title}</p>
+            </Link>
+          ))}
+        </div>
+      )}
+      <div className="notice-panel">
+        <h3>Controlled release operations</h3>
+        <p>
+          Driver approvals are versioned. Financial records change only after
+          provider verification. Test receipts and earnings remain auditable.
+        </p>
+      </div>
+      <section className="workspace-section">
+        <h2 style={{ fontSize: 22, marginBottom: 20 }}>
+          Start with what needs you.
+        </h2>
+        <div className="help-grid">
+          <Link className="help-card panel" href="/admin/drivers">
+            <UsersRound size={26} />
+            <h3>Review drivers</h3>
+            <p>
+              Inspect applications and the exact vehicle version before
+              approval.
+            </p>
+          </Link>
+          <Link className="help-card panel" href="/admin/rides">
+            <CarFront size={26} />
+            <h3>Inspect rides</h3>
+            <p>Review trip stages, locked fares and payment attention.</p>
+          </Link>
+          <Link className="help-card panel" href="/admin/support">
+            <LifeBuoy size={26} />
+            <h3>Respond to support</h3>
+            <p>Keep replies and resolution in the saved conversation.</p>
+          </Link>
+        </div>
+      </section>
+    </>
+  );
+}
+export function DriverQueue() {
+  const [status, setStatus] = useState("pending"),
+    [exact, setExact] = useState(""),
+    [search, setSearch] = useState(""),
+    [extra, setExtra] = useState<Driver[]>([]),
+    [cursor, setCursor] = useState<string | null>(null),
+    m = useMutation();
+  const path = `admin/drivers?status=${status}${exact ? `&exact=${encodeURIComponent(exact)}` : ""}`,
+    r = useResource<Page<Driver>>(path);
+  async function more() {
+    await m.run<Page<Driver>>(
+      `${path}&cursor=${encodeURIComponent(cursor ?? r.data!.nextCursor!)}`,
+      undefined,
+      (p) => {
+        setExtra([...extra, ...p.items]);
+        setCursor(p.nextCursor);
+      },
+      "GET",
+    );
+  }
+  const rows = [...(r.data?.items ?? []), ...extra];
+  return (
+    <>
+      <Heading
+        title="The people behind each journey."
+        description="Review driver applications and their submitted vehicles."
+      />
+      <div className="tabs">
+        {["pending", "approved", "rejected", "suspended"].map((s) => (
+          <button
+            key={s}
+            className={status === s ? "active" : ""}
+            onClick={() => {
+              setStatus(s);
+              setExtra([]);
+              setCursor(null);
+              setExact("");
+            }}
+          >
+            {label(s)}
+          </button>
+        ))}
+      </div>
+      <form
+        className="admin-search"
+        onSubmit={(e) => {
+          e.preventDefault();
+          setExact(search);
+          setExtra([]);
+        }}
+      >
+        <input
+          aria-label="Exact plate or driver UID"
+          placeholder="Exact registration or driver UID"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+        <Button variant="secondary">Search</Button>
+        {exact && (
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => {
+              setExact("");
+              setSearch("");
+            }}
+          >
+            Clear
+          </Button>
+        )}
+      </form>
+      {r.loading ? (
+        <Loading />
+      ) : r.error ? (
+        <Banner kind="error">
+          {r.error}
+          <Button onClick={r.refresh}>Retry</Button>
+        </Banner>
+      ) : rows.length ? (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Driver</th>
+                <th>Vehicle</th>
+                <th>Registration</th>
+                <th>Status</th>
+                <th>Review</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((d) => (
+                <tr key={d.id}>
+                  <td data-label="Driver">
+                    <div>
+                      <strong>{d.displayName}</strong>
+                      <small>Application v{d.applicationVersion}</small>
+                    </div>
+                  </td>
+                  <td data-label="Vehicle">
+                    {d.vehicle?.make} {d.vehicle?.model}
+                  </td>
+                  <td data-label="Registration">{d.vehicle?.plate}</td>
+                  <td data-label="Status">
+                    <Status value={d.approvalStatus} />
+                  </td>
+                  <td data-label="Review">
+                    <Link
+                      className="text-link"
+                      href={`/admin/drivers/${d.uid}`}
+                    >
+                      Review application
+                    </Link>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <Empty icon={UsersRound} title="No applications in this queue">
+          Submitted driver applications will appear here for review.
+        </Empty>
+      )}
+      {(extra.length ? cursor : r.data?.nextCursor) && (
+        <div className="load-more">
+          <Button variant="secondary" busy={m.busy} onClick={more}>
+            Load more
+          </Button>
+        </div>
+      )}
+      {m.error && <Banner kind="error">{m.error}</Banner>}
+    </>
+  );
+}
+export function DriverReview({ uid }: { uid: string }) {
+  const r = useResource<Driver>(`admin/drivers/${uid}`),
+    m = useMutation(),
+    router = useRouter(),
+    [decision, setDecision] = useState<string | null>(null),
+    [reason, setReason] = useState("");
+  if (r.loading) return <Loading />;
+  if (!r.data) return <Banner kind="error">{r.error}</Banner>;
+  const d = r.data;
+  return (
+    <div className="form-page">
+      <Link className="back-link" href="/admin/drivers">
+        Back to applications
+      </Link>
+      <Heading
+        title={d.displayName ?? "Driver application"}
+        description={`Submitted application version ${d.applicationVersion}`}
+      />
+      <section className="panel">
+        <Status value={d.approvalStatus} />
+        <dl className="receipt-details">
+          {[
+            ["Vehicle", `${d.vehicle?.make} ${d.vehicle?.model}`],
+            ["Registration", d.vehicle?.plate ?? ""],
+            ["Colour", d.vehicle?.color ?? ""],
+            ["Passenger seats", String(d.vehicle?.seats ?? 4)],
+            ["Application version", String(d.applicationVersion)],
+          ].map(([title, value]) => (
+            <div key={title}>
+              <dt>{title}</dt>
+              <dd>{value}</dd>
+            </div>
+          ))}
+        </dl>
+        {d.reviewReason && <Banner kind="warning">{d.reviewReason}</Banner>}
+        {m.error && <Banner kind="error">{m.error}</Banner>}
+        <div className="action-stack">
+          {d.approvalStatus === "pending" && (
+            <>
+              <Button onClick={() => setDecision("approve")}>
+                Approve driver
+              </Button>
+              <Button variant="secondary" onClick={() => setDecision("reject")}>
+                Reject application
+              </Button>
+            </>
+          )}
+          {d.approvalStatus === "approved" && (
+            <Button variant="secondary" onClick={() => setDecision("suspend")}>
+              Suspend driver
+            </Button>
+          )}
+        </div>
+      </section>
+      <Modal
+        open={!!decision}
+        onOpenChange={(o) => !o && setDecision(null)}
+        title={`${label(decision ?? "approve")} this driver?`}
+        description={`This decision applies to ${d.vehicle?.plate}, application version ${d.applicationVersion}.`}
+      >
+        {decision !== "approve" && (
+          <div className="field">
+            <label htmlFor="decision-reason">Reason</label>
+            <textarea
+              id="decision-reason"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              minLength={5}
+              maxLength={500}
+              required
+            />
+          </div>
+        )}
+        {m.error && <Banner kind="error">{m.error}</Banner>}
+        <div className="dialog-actions">
+          <Button variant="secondary" onClick={() => setDecision(null)}>
+            Cancel
+          </Button>
+          <Button
+            variant={decision === "approve" ? "primary" : "danger"}
+            busy={m.busy}
+            disabled={decision !== "approve" && reason.trim().length < 5}
+            onClick={() =>
+              m.run(
+                `admin/drivers/${uid}/decision`,
+                {
+                  decision,
+                  reason,
+                  applicationVersion: d.applicationVersion,
+                  expectedVersion: d.version,
+                },
+                () => {
+                  setDecision(null);
+                  router.push("/admin/drivers");
+                },
+              )
+            }
+          >
+            Confirm {decision}
+          </Button>
+        </div>
+      </Modal>
+    </div>
+  );
+}
+export function AdminRides({ initial = "all" }: { initial?: string }) {
+  const [status, setStatus] = useState(initial),
+    [exact, setExact] = useState(""),
+    [search, setSearch] = useState(""),
+    [extra, setExtra] = useState<Ride[]>([]),
+    [cursor, setCursor] = useState<string | null>(null),
+    m = useMutation(),
+    path = `admin/rides?status=${status}${exact ? `&exact=${encodeURIComponent(exact)}` : ""}`,
+    r = useResource<Page<Ride>>(path);
+  async function more() {
+    await m.run<Page<Ride>>(
+      `${path}&cursor=${encodeURIComponent(cursor ?? r.data!.nextCursor!)}`,
+      undefined,
+      (p) => {
+        setExtra([...extra, ...p.items]);
+        setCursor(p.nextCursor);
+      },
+      "GET",
+    );
+  }
+  const rows = [...(r.data?.items ?? []), ...extra];
+  return (
+    <>
+      <Heading
+        title="Every journey, accounted for."
+        description="Inspect canonical trip and payment records."
+      />
+      <div className="tabs">
+        {[
+          ["all", "All"],
+          ["searching", "Searching"],
+          ["active", "Active"],
+          ["completed", "Completed"],
+          ["cancelled", "Cancelled"],
+          ["attention", "Payment attention"],
+        ].map(([key, title]) => (
+          <button
+            key={key}
+            className={status === key ? "active" : ""}
+            onClick={() => {
+              setStatus(key);
+              setExtra([]);
+              setCursor(null);
+              setExact("");
+            }}
+          >
+            {title}
+          </button>
+        ))}
+      </div>
+      <form
+        className="admin-search"
+        onSubmit={(e) => {
+          e.preventDefault();
+          setExact(search);
+          setExtra([]);
+        }}
+      >
+        <input
+          aria-label="Exact ride ID"
+          placeholder="Search exact ride ID"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+        <Button variant="secondary">Search</Button>
+        {exact && (
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => {
+              setExact("");
+              setSearch("");
+            }}
+          >
+            Clear
+          </Button>
+        )}
+      </form>
+      {r.loading ? (
+        <Loading />
+      ) : r.error ? (
+        <Banner kind="error">
+          {r.error}
+          <Button onClick={r.refresh}>Retry</Button>
+        </Banner>
+      ) : rows.length ? (
+        <RideRows items={rows} workspace="admin" />
+      ) : (
+        <Empty icon={CarFront} title="No rides in this view">
+          Ride records will appear as passengers request journeys.
+        </Empty>
+      )}
+      {(extra.length ? cursor : r.data?.nextCursor) && (
+        <div className="load-more">
+          <Button variant="secondary" busy={m.busy} onClick={more}>
+            Load more
+          </Button>
+        </div>
+      )}
+    </>
+  );
+}
+export function RideInspection({ id }: { id: string }) {
+  const r = useResource<Ride>(`rides/${id}`, 10000),
+    m = useMutation();
+  if (r.loading) return <Loading />;
+  if (!r.data) return <Banner kind="error">{r.error}</Banner>;
+  const ride = r.data;
+  return (
+    <div className="payment-layout">
+      <Link className="back-link" href="/admin/rides">
+        Back to rides
+      </Link>
+      <Heading title="Ride inspection" description={id} />
+      <section className="panel">
+        <div className="badges">
+          <Status value={ride.status} />
+          <Status value={ride.paymentStatus} />
+        </div>
+        <Endpoints
+          pickup={ride.pickup.label}
+          destination={ride.destination.label}
+        />
+        <FareBreakdown quote={ride} />
+        <dl className="receipt-details">
+          <div>
+            <dt>Passenger</dt>
+            <dd>{ride.riderSnapshot.displayName}</dd>
+          </div>
+          <div>
+            <dt>Driver</dt>
+            <dd>{ride.driverSnapshot?.displayName ?? "Unassigned"}</dd>
+          </div>
+          <div>
+            <dt>Created</dt>
+            <dd>{date(ride.createdAt)}</dd>
+          </div>
+          <div>
+            <dt>Version</dt>
+            <dd>{ride.version}</dd>
+          </div>
+          <div>
+            <dt>Tracking access</dt>
+            <dd>{ride.accessSyncPending ? "Sync pending" : "Synchronized"}</dd>
+          </div>
+          <div>
+            <dt>Provider order</dt>
+            <dd>{ride.payment?.providerOrderId ?? "Not created"}</dd>
+          </div>
+          <div>
+            <dt>Captured payment</dt>
+            <dd>{ride.payment?.capturedPaymentId ?? "Not captured"}</dd>
+          </div>
+        </dl>
+        <h3 style={{ marginTop: 28, fontSize: 18 }}>Recorded events</h3>
+        <div className="receipt-details">
+          {ride.events?.map((e, i) => (
+            <div key={i}>
+              <span>{label(e.eventType)}</span>
+              <small className="muted">{date(e.createdAt)}</small>
+            </div>
+          ))}
+        </div>
+        {m.error && <Banner kind="error">{m.error}</Banner>}
+        <div className="action-stack">
+          <Button
+            variant="secondary"
+            busy={m.busy}
+            onClick={() => m.run(`admin/rides/${id}/reconcile`, {}, r.refresh)}
+          >
+            Reconcile status
+          </Button>
+          <Link
+            className="text-link"
+            href={`/admin/help/new?ride=${id}&category=payment`}
+          >
+            Open support ticket
+          </Link>
+        </div>
+        <p className="compact-note">
+          Payment verification checks the provider. Financial status cannot be
+          manually marked paid.
+        </p>
+      </section>
+    </div>
+  );
+}
+export function DemoTools() {
+  const m = useMutation(),
+    [ids, setIds] = useState(""),
+    [open, setOpen] = useState(false),
+    [confirmation, setConfirmation] = useState(""),
+    [result, setResult] = useState("");
+  return (
+    <div className="form-page">
+      <Heading
+        title="Controlled demo tools"
+        description="Use separate passenger and driver identities in two browsers."
+      />
+      <section className="panel">
+        <FlaskConical size={32} className="muted" />
+        <h2 style={{ marginTop: 20 }}>Walk through a real workflow</h2>
+        <p className="compact-note">
+          A passenger gets a quote and requests a ride. An approved, allowlisted
+          driver uses an explicitly simulated location, accepts, arrives, enters
+          the passenger’s PIN, starts and completes the trip. The passenger
+          finishes a provider-backed test payment.
+        </p>
+        <Banner kind="warning">
+          Reset accepts only unpaid terminal demo records. Active rides and
+          captured payment history are protected.
+        </Banner>
+        <div className="field">
+          <label htmlFor="demo-ids">Exact demo ride IDs (one per line)</label>
+          <textarea
+            id="demo-ids"
+            value={ids}
+            onChange={(e) => setIds(e.target.value)}
+          />
+        </div>
+        <Button
+          variant="secondary"
+          disabled={!ids.trim()}
+          onClick={() => setOpen(true)}
+        >
+          Reset terminal demo fixtures
+        </Button>
+        {result && <Banner kind="success">{result}</Banner>}
+        {m.error && <Banner kind="error">{m.error}</Banner>}
+      </section>
+      <Modal
+        open={open}
+        onOpenChange={setOpen}
+        title="Reset these unpaid demo rides?"
+        description={ids}
+      >
+        <div className="field">
+          <label htmlFor="reset-confirmation">Type RESET DEMO</label>
+          <input
+            id="reset-confirmation"
+            value={confirmation}
+            onChange={(e) => setConfirmation(e.target.value)}
+          />
+        </div>
+        <div className="dialog-actions">
+          <Button variant="secondary" onClick={() => setOpen(false)}>
+            Keep records
+          </Button>
+          <Button
+            variant="danger"
+            busy={m.busy}
+            disabled={confirmation !== "RESET DEMO"}
+            onClick={() =>
+              m.run<{
+                resetCount: number;
+              }>(
+                "admin/demo/reset",
+                {
+                  confirmation,
+                  rideIds: ids
+                    .split("\n")
+                    .map((s) => s.trim())
+                    .filter(Boolean),
+                },
+                (r) => {
+                  setOpen(false);
+                  setResult(`${r.resetCount} unpaid demo records reset.`);
+                },
+              )
+            }
+          >
+            Confirm reset
+          </Button>
+        </div>
+      </Modal>
+    </div>
+  );
+}
