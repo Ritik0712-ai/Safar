@@ -1,7 +1,6 @@
 "use client";
 import Link from "next/link";
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
 import { money, date, type Ride, type Role } from "@/contracts";
 import { api, useAuth } from "@/components/auth-provider";
 import { CityMap } from "@/components/map-loader";
@@ -37,6 +36,8 @@ export function Trip({ id, workspace }: { id: string; workspace: Role }) {
     [showPin, setShowPin] = useState(false),
     [clock, setClock] = useState(() => Date.now());
   const stopGps = ownGps.stop;
+  const refreshAccount = auth.refresh;
+  const rideStatus = r.data?.status;
   useEffect(() => {
     const timer = setInterval(() => setClock(Date.now()), 1000);
     return () => clearInterval(timer);
@@ -45,6 +46,9 @@ export function Trip({ id, workspace }: { id: string; workspace: Role }) {
     if (r.data?.status === "completed" || r.data?.status === "cancelled")
       stopGps();
   }, [r.data?.status, stopGps]);
+  useEffect(() => {
+    if (rideStatus && terminal(rideStatus)) void refreshAccount();
+  }, [rideStatus, refreshAccount]);
   if (r.loading) return <Loading />;
   if (!r.data)
     return (

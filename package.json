@@ -17,7 +17,9 @@
     "test:e2e": "playwright test",
     "emulators": "firebase emulators:start --project demo-safar",
     "setup:local": "node scripts/setup-local.mjs",
-    "seed": "tsx --env-file=.env.local scripts/seed.ts"
+    "seed": "tsx --env-file=.env.local scripts/seed.ts",
+    "test:journey": "node scripts/run-e2e-fixtures.mjs",
+    "grant-admin": "tsx --env-file=.env.local scripts/grant-admin.ts"
   },
   "repository": {
     "type": "git",
@@ -66,5 +68,8 @@
   },
   "overrides": {
     "@grpc/grpc-js": "1.14.5"
+  },
+  "engines": {
+    "node": "24.x"
   }
 }

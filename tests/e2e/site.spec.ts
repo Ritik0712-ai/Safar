@@ -59,7 +59,9 @@ test("seeded local passenger, driver and administrator workspaces", async ({
     await page.getByLabel("Email address").fill(a.email);
     await page.getByLabel("Password", { exact: true }).fill(a.password);
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
-    await expect(page).toHaveURL(new RegExp("/" + a.role + "$"));
+    await expect(page).toHaveURL(new RegExp("/" + a.role + "$"),{timeout:25000});
+    await expect(page.locator('main h1')).toBeVisible();
+    if(a.role==='rider') await page.locator('.leaflet-tile-loaded').first().waitFor({timeout:15000}).catch(()=>{});
     await page.screenshot({
       path: `artifacts/${a.role}-workspace-desktop.png`,
       fullPage: true,
@@ -75,6 +77,8 @@ test("seeded local passenger, driver and administrator workspaces", async ({
     }
     await page.setViewportSize({ width: 360, height: 800 });
     await page.goto("/" + a.role);
+    await expect(page.locator('main h1')).toBeVisible();
+    if(a.role==='rider') await page.locator('.leaflet-tile-loaded').first().waitFor({timeout:15000}).catch(()=>{});
     await page.screenshot({
       path: `artifacts/${a.role}-workspace-mobile.png`,
       fullPage: true,

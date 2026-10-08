@@ -27,6 +27,7 @@ export default async function Page({
   const { segments } = await params,
     path = segments.join("/"),
     [workspace, screen] = segments;
+  if (workspace === "driver" && screen === "rides" && segments[3]) notFound();
   if (path === "privacy" || path === "terms")
     return (
       <main id="main" className="notice">
@@ -147,7 +148,17 @@ export default async function Page({
     process.env.DEMO_MODE === "true" && process.env.APP_ENV !== "production";
   if (path === "admin/demo" && !demo) notFound();
   return (
-    <Shell workspace={workspace as Role} serverUid={identity.uid} demo={demo}>
+    <Shell
+      workspace={workspace as Role}
+      serverUid={identity.uid}
+      demo={demo}
+      testFixtures={
+        process.env.APP_ENV === "test" &&
+        process.env.TEST_PROVIDER_FIXTURES === "true" &&
+        !!process.env.FIRESTORE_EMULATOR_HOST &&
+        !process.env.VERCEL
+      }
+    >
       <Suspense fallback={<Loading />}>
         <Workspace segments={segments} />
       </Suspense>

@@ -2576,3 +2576,6 @@ td small {
     transition: none !important;
   }
 }
+
+@media (min-width: 1251px) { .public-demo, .drive-strip { width: calc(100% - 128px); } }
+.banner input { width: 100%; min-height: 44px; background: white; color: var(--ink); border: 1px solid var(--border); border-radius: 8px; padding: 8px; }

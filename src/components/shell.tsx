@@ -44,11 +44,13 @@ export function Shell({
   children,
   serverUid,
   demo,
+  testFixtures = false,
 }: {
   workspace: Role;
   children: ReactNode;
   serverUid: string;
   demo: boolean;
+  testFixtures?: boolean;
 }) {
   const auth = useAuth(),
     path = usePathname(),
@@ -166,6 +168,12 @@ export function Shell({
           </div>
         </header>
         <main className="workspace-main" id="main">
+          {testFixtures && (
+            <Banner kind="warning">
+              Automated test fixtures — map routes and payment provider
+              responses are simulated.
+            </Banner>
+          )}
           {!auth.online && (
             <Banner kind="warning">
               You’re offline. Reconnect to continue.{" "}

@@ -1,5 +1,10 @@
 import type { NextConfig } from "next";
 const config: NextConfig = {
+  distDir:
+    process.env.APP_ENV === "test" &&
+    process.env.TEST_PROVIDER_FIXTURES === "true"
+      ? ".next/e2e"
+      : ".next",
   poweredByHeader: false,
   serverExternalPackages: ["firebase-admin"],
   async headers() {

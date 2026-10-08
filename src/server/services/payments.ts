@@ -34,9 +34,15 @@ function credentials() {
 }
 async function provider(path: string, body?: unknown) {
   const c = credentials();
+  let origin = 'https://api.razorpay.com/v1/';
+  if(process.env.TEST_PAYMENT_PROVIDER_URL&&process.env.APP_ENV==='test'&&process.env.FIRESTORE_EMULATOR_HOST&&process.env.TEST_PROVIDER_FIXTURES==='true'&&!process.env.VERCEL){
+    const fixture = new URL(process.env.TEST_PAYMENT_PROVIDER_URL);
+    ensure(fixture.protocol==='http:'&&fixture.hostname==='127.0.0.1',503,'INVALID_TEST_PROVIDER','Test provider configuration is unavailable.');
+    origin=fixture.toString();
+  }
   let res;
   try {
-    res = await fetch(`https://api.razorpay.com/v1/${path}`, {
+    res = await fetch(new URL(path,origin), {
       method: body ? "POST" : "GET",
       headers: {
         Authorization: `Basic ${Buffer.from(`${c.id}:${c.secret}`).toString("base64")}`,

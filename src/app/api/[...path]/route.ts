@@ -43,6 +43,12 @@ async function handler(req: Request, ctx: Context) {
       p = path.join("/"),
       method = req.method,
       cookie = await cookies();
+    const trustedOrigins = new Set([
+      process.env.APP_ORIGIN,
+      process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : undefined,
+      process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : undefined,
+    ].filter(Boolean));
+    const sameOrigin = trustedOrigins.has(req.headers.get('origin')??'');
     const config = {
       serviceArea: area,
       rideType: "economy",
@@ -80,7 +86,7 @@ async function handler(req: Request, ctx: Context) {
     }
     if (p === "session" && method === "DELETE") {
       ensure(
-        req.headers.get("origin") === url.origin &&
+        sameOrigin &&
           req.headers.get("x-csrf-token") === cookie.get("safar_csrf")?.value,
         403,
         "INVALID_ORIGIN",
@@ -106,7 +112,7 @@ async function handler(req: Request, ctx: Context) {
       );
     if (method !== "GET")
       ensure(
-        req.headers.get("origin") === url.origin ||
+        sameOrigin ||
           (!req.headers.has("origin") && process.env.APP_ENV === "test"),
         403,
         "INVALID_ORIGIN",
