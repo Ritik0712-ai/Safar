@@ -135,6 +135,15 @@ export default async function Page({
       </main>
     );
   if (!identity.email_verified) redirect("/verify-email");
+  if (screen === "rides" && segments[2]) {
+    const ride = await admin().db.doc(`rides/${segments[2]}`).get();
+    if (
+      !ride.exists ||
+      (workspace === "rider" && ride.data()?.riderId !== identity.uid) ||
+      (workspace === "driver" && ride.data()?.driverId !== identity.uid)
+    )
+      notFound();
+  }
   if (workspace === "driver" && !screen) {
     const d = await admin().db.doc(`drivers/${identity.uid}`).get();
     if (d.data()?.approvalStatus !== "approved")

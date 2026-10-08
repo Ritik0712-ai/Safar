@@ -1,0 +1,31 @@
+name: Verify Safar
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - run: npm ci
+      - run: npm run setup:local
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - run: npm install --global firebase-tools@14.0.1
+      - run: firebase emulators:exec --project demo-safar --only auth,firestore,database "npm run test:integration"
+      - run: npx playwright install --with-deps chromium
+      - run: firebase emulators:exec --project demo-safar --only auth,firestore,database "npm run test:journey"

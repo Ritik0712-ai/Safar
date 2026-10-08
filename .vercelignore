@@ -1,0 +1,11 @@
+.git/
+.env*
+artifacts/
+test-results/
+playwright-report/
+.firebase/
+*-debug.log
+firebase-debug.log*
+*.tsbuildinfo
+node_modules/
+.next/
