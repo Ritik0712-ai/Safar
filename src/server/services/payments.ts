@@ -34,15 +34,26 @@ function credentials() {
 }
 async function provider(path: string, body?: unknown) {
   const c = credentials();
-  let origin = 'https://api.razorpay.com/v1/';
-  if(process.env.TEST_PAYMENT_PROVIDER_URL&&process.env.APP_ENV==='test'&&process.env.FIRESTORE_EMULATOR_HOST&&process.env.TEST_PROVIDER_FIXTURES==='true'&&!process.env.VERCEL){
+  let origin = "https://api.razorpay.com/v1/";
+  if (
+    process.env.TEST_PAYMENT_PROVIDER_URL &&
+    process.env.APP_ENV === "test" &&
+    process.env.FIRESTORE_EMULATOR_HOST &&
+    process.env.TEST_PROVIDER_FIXTURES === "true" &&
+    !process.env.VERCEL
+  ) {
     const fixture = new URL(process.env.TEST_PAYMENT_PROVIDER_URL);
-    ensure(fixture.protocol==='http:'&&fixture.hostname==='127.0.0.1',503,'INVALID_TEST_PROVIDER','Test provider configuration is unavailable.');
-    origin=fixture.toString();
+    ensure(
+      fixture.protocol === "http:" && fixture.hostname === "127.0.0.1",
+      503,
+      "INVALID_TEST_PROVIDER",
+      "Test provider configuration is unavailable.",
+    );
+    origin = fixture.toString();
   }
   let res;
   try {
-    res = await fetch(new URL(path,origin), {
+    res = await fetch(new URL(path, origin), {
       method: body ? "POST" : "GET",
       headers: {
         Authorization: `Basic ${Buffer.from(`${c.id}:${c.secret}`).toString("base64")}`,
@@ -447,8 +458,32 @@ export async function verify(a: Actor, body: unknown) {
   const capture = captureSchema.parse(
     await provider(`payments/${encodeURIComponent(b.paymentId)}`),
   );
+  ensure(
+    capture.id === b.paymentId &&
+      capture.order_id === p.providerOrderId &&
+      capture.amount === p.amountPaise,
+    422,
+    "PAYMENT_MISMATCH",
+    "The provider payment does not match this ride.",
+  );
   if (capture.status === "captured") return applyCapture(capture);
-  return { status: "processing" };
+  const status =
+    capture.status === "authorized"
+      ? "processing"
+      : capture.status === "failed"
+        ? "failed"
+        : "pending";
+  return admin().db.runTransaction(async (t) => {
+    const pr = admin().db.doc(`payments/${b.rideId}`),
+      rr = admin().db.doc(`rides/${b.rideId}`),
+      [pd, rd] = await t.getAll(pr, rr);
+    if (pd.data()?.capturedPaymentId) return { status: pd.data()!.status };
+    if (pd.data()?.status === "review_required")
+      return { status: "review_required" };
+    t.update(pr, { status, ...updated(pd.data()!.version) });
+    t.update(rr, { paymentStatus: status, ...updated(rd.data()!.version) });
+    return { status };
+  });
 }
 export async function paymentStatus(a: Actor, id: string, reconcile = true) {
   const doc = await authorizeRide(a, id),

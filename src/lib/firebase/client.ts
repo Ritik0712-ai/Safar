@@ -2,6 +2,7 @@
 import { getApps, initializeApp } from "firebase/app";
 import { getAuth, connectAuthEmulator } from "firebase/auth";
 import { getDatabase, connectDatabaseEmulator } from "firebase/database";
+import { getFirestore, connectFirestoreEmulator } from "firebase/firestore";
 let connected = false;
 export function firebase() {
   if (
@@ -19,7 +20,8 @@ export function firebase() {
       appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
     });
   const auth = getAuth(app),
-    rtdb = getDatabase(app);
+    rtdb = getDatabase(app),
+    db = getFirestore(app);
   if (
     process.env.NEXT_PUBLIC_USE_EMULATORS === "true" &&
     !connected &&
@@ -29,7 +31,8 @@ export function firebase() {
       disableWarnings: true,
     });
     connectDatabaseEmulator(rtdb, "127.0.0.1", 9000);
+    connectFirestoreEmulator(db, "127.0.0.1", 8080);
     connected = true;
   }
-  return { auth, rtdb };
+  return { auth, rtdb, db };
 }

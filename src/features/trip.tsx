@@ -15,6 +15,7 @@ import {
   Modal,
 } from "@/components/ui";
 import { useMutation, useResource } from "@/lib/hooks";
+import { useRideUpdates } from "@/lib/live";
 import { useTracking } from "@/lib/location";
 import { useDriverLocation } from "@/components/location-provider";
 import { canCancel, terminal } from "@/lib/domain";
@@ -28,6 +29,7 @@ export function Trip({ id, workspace }: { id: string; workspace: Role }) {
         : null,
     ),
     ownGps = useDriverLocation();
+  useRideUpdates(id, r.refresh);
   const [confirm, setConfirm] = useState<string | null>(null),
     [reason, setReason] = useState("plans_changed"),
     [note, setNote] = useState(""),

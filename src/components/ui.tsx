@@ -11,7 +11,12 @@ import {
   ChevronRight,
   type LucideIcon,
 } from "lucide-react";
-import { type ReactNode, type ButtonHTMLAttributes } from "react";
+import {
+  useRef,
+  useEffect,
+  type ReactNode,
+  type ButtonHTMLAttributes,
+} from "react";
 export function Brand({
   href = "/",
   light = false,
@@ -179,10 +184,16 @@ export function Heading({
   description?: string;
   action?: ReactNode;
 }) {
+  const ref = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    ref.current?.focus();
+  }, []);
   return (
     <div className="page-heading">
       <div>
-        <h1 tabIndex={-1}>{title}</h1>
+        <h1 ref={ref} tabIndex={-1}>
+          {title}
+        </h1>
         {description && <p>{description}</p>}
       </div>
       {action}

@@ -260,10 +260,27 @@ export async function offers(a: Actor) {
   const snap = await admin()
     .db.collection(`drivers/${a.uid}/offers`)
     .where("status", "==", "open")
+    .where("expiresAt", ">", now())
     .orderBy("expiresAt", "asc")
     .limit(10)
     .get();
   const items: Offer[] = [];
+  const expired = await admin()
+    .db.collection(`drivers/${a.uid}/offers`)
+    .where("status", "==", "open")
+    .where("expiresAt", "<=", now())
+    .limit(10)
+    .get();
+  if (!expired.empty)
+    await admin().db.runTransaction(async (t) => {
+      const current = await t.getAll(...expired.docs.map((d) => d.ref));
+      for (const doc of current)
+        if (
+          doc.data()?.status === "open" &&
+          doc.data()?.expiresAt.toMillis() <= Date.now()
+        )
+          t.update(doc.ref, { status: "expired", respondedAt: now() });
+    });
   for (const doc of snap.docs) {
     const offer = dto<Offer>(doc),
       r = await admin().db.doc(`rides/${offer.rideId}`).get();
@@ -277,6 +294,15 @@ export async function offers(a: Actor) {
         pickupDistanceMeters: driver.lastLocation
           ? Math.round(distance(driver.lastLocation, offer.pickup))
           : 0,
+      });
+    else
+      await admin().db.runTransaction(async (t) => {
+        const [current, ride] = await t.getAll(doc.ref, r.ref);
+        if (
+          current.data()?.status === "open" &&
+          ride.data()?.status !== "searching"
+        )
+          t.update(doc.ref, { status: "unavailable", respondedAt: now() });
       });
   }
   return { items, nextCursor: null };

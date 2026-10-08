@@ -13,6 +13,7 @@ import { api, useAuth } from "@/components/auth-provider";
 import { firebase } from "@/lib/firebase/client";
 import { Button, Banner, Loading, Endpoints } from "@/components/ui";
 import { useResource, useMutation } from "@/lib/hooks";
+import { useRideUpdates } from "@/lib/live";
 import { FareBreakdown } from "./booking";
 interface CheckoutOptions {
   key: string;
@@ -76,6 +77,7 @@ export function PaymentScreen({
       checkoutKeyId: string;
       amountPaise: number;
     } | null>(null);
+  useRideUpdates(id, r.refresh);
   useEffect(() => {
     if (receipt && r.data && !r.data.payment?.capturedPaymentId)
       router.replace(`/rider/rides/${id}/payment`);

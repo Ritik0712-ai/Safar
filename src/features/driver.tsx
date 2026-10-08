@@ -15,6 +15,7 @@ import {
   Endpoints,
 } from "@/components/ui";
 import { useResource, useMutation } from "@/lib/hooks";
+import { useOfferUpdates } from "@/lib/live";
 import { useDriverLocation } from "@/components/location-provider";
 import {
   type Driver,
@@ -38,6 +39,7 @@ export function DriverDashboard() {
     >("drivers/me/earnings?range=today", 15000),
     m = useMutation(),
     gps = useDriverLocation();
+  useOfferUpdates(offers.refresh);
   if (d.loading) return <Loading />;
   if (!d.data)
     return (

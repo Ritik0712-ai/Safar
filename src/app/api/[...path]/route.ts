@@ -24,6 +24,29 @@ import * as geo from "@/server/providers/geoapify";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 type Context = { params: Promise<{ path: string[] }> };
+async function readBody(req: Request, limit: number) {
+  ensure(
+    Number(req.headers.get("content-length") ?? 0) <= limit,
+    413,
+    "BODY_TOO_LARGE",
+    "This request is too large.",
+  );
+  const reader = req.body?.getReader();
+  if (!reader) return "";
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    length += value.byteLength;
+    if (length > limit) {
+      await reader.cancel();
+      throw new AppError(413, "BODY_TOO_LARGE", "This request is too large.");
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
 async function handler(req: Request, ctx: Context) {
   const requestId = randomUUID();
   const json = (data: unknown, status = 200) =>
@@ -43,12 +66,18 @@ async function handler(req: Request, ctx: Context) {
       p = path.join("/"),
       method = req.method,
       cookie = await cookies();
-    const trustedOrigins = new Set([
-      process.env.APP_ORIGIN,
-      process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : undefined,
-      process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : undefined,
-    ].filter(Boolean));
-    const sameOrigin = trustedOrigins.has(req.headers.get('origin')??'');
+    const trustedOrigins = new Set(
+      [
+        process.env.APP_ORIGIN,
+        process.env.VERCEL_URL
+          ? `https://${process.env.VERCEL_URL}`
+          : undefined,
+        process.env.VERCEL_PROJECT_PRODUCTION_URL
+          ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+          : undefined,
+      ].filter(Boolean),
+    );
+    const sameOrigin = trustedOrigins.has(req.headers.get("origin") ?? "");
     const config = {
       serviceArea: area,
       rideType: "economy",
@@ -95,7 +124,10 @@ async function handler(req: Request, ctx: Context) {
       cookie.delete("safar_session");
       return json({ signedOut: true });
     }
-    const raw = method === "GET" ? "" : await req.text();
+    const raw =
+      method === "GET"
+        ? ""
+        : await readBody(req, p === "webhooks/razorpay" ? 262144 : 16384);
     ensure(
       Buffer.byteLength(raw) <= (p === "webhooks/razorpay" ? 262144 : 16384),
       413,
@@ -308,6 +340,18 @@ async function handler(req: Request, ctx: Context) {
     }
     throw new AppError(404, "NOT_FOUND", "This endpoint is unavailable.");
   } catch (e) {
+    if (e instanceof SyntaxError)
+      return NextResponse.json(
+        {
+          error: {
+            code: "INVALID_JSON",
+            message: "This request contains invalid data.",
+            retryable: false,
+          },
+          requestId,
+        },
+        { status: 400 },
+      );
     if (e instanceof z.ZodError)
       return NextResponse.json(
         {

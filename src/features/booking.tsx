@@ -51,7 +51,9 @@ function Address({
     [error, setError] = useState(""),
     [selected, setSelected] = useState(-1),
     [focused, setFocused] = useState(false);
-  useEffect(() => setText(value?.label ?? ""), [value]);
+  useEffect(() => {
+    if (value) setText(value.label);
+  }, [value]);
   useEffect(() => {
     if (text.length < 3 || text === value?.label) {
       setSuggestions([]);
@@ -308,7 +310,7 @@ export function Booking() {
               setPickup(destination);
               setDestination(pickup);
             }}
-            disabled={!pickup && !destination}
+            disabled={!pickup || !destination}
           >
             <ArrowDownUp size={15} />
             Swap locations

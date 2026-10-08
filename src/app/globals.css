@@ -367,7 +367,7 @@ select:focus {
   font-size: 13px;
 }
 .caption-coordinates {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted);
 }
 .map-recenter {
@@ -2002,7 +2002,7 @@ td small {
     align-items: flex-start;
   }
   .hero-note {
-    font-size: 11px;
+    font-size: 12px;
   }
   .public-header nav {
     gap: 20px;
@@ -2106,7 +2106,7 @@ td small {
     padding: 12px 15px;
   }
   .map-city-tag small {
-    font-size: 11px;
+    font-size: 12px;
   }
   .public-demo {
     margin: 28px 24px 0;
@@ -2238,7 +2238,7 @@ td small {
     font-size: 12px;
   }
   .workspace-header .demo-pill {
-    font-size: 10px;
+    font-size: 12px;
   }
   .page-heading {
     margin-bottom: 24px;
@@ -2275,7 +2275,7 @@ td small {
     max-height: 350px;
   }
   .booking-map .map-area-note {
-    font-size: 10px;
+    font-size: 12px;
     top: 16px;
     padding: 7px 10px;
   }
@@ -2286,7 +2286,7 @@ td small {
     margin-top: 4px;
   }
   .booking-footnote {
-    font-size: 11px !important;
+    font-size: 12px !important;
   }
   .booking-workspace .booking-form > p:first-of-type {
     display: none;
@@ -2310,7 +2310,7 @@ td small {
     justify-content: center;
     flex-direction: column;
     gap: 4px;
-    font-size: 11px;
+    font-size: 12px;
     color: var(--muted);
     min-height: 48px;
   }
@@ -2328,7 +2328,7 @@ td small {
     font-size: 13px;
   }
   .ride-row-main p {
-    font-size: 11px;
+    font-size: 12px;
   }
   .ride-row-side strong {
     font-size: 16px;
@@ -2337,7 +2337,7 @@ td small {
     justify-content: flex-end;
   }
   .ride-row .status {
-    font-size: 10px;
+    font-size: 12px;
     padding: 3px 6px;
   }
   .empty {
@@ -2442,14 +2442,14 @@ td small {
     font-size: 14px;
   }
   .ticket-row p {
-    font-size: 11px;
+    font-size: 12px;
   }
   .message {
     max-width: 95%;
     padding: 18px;
   }
   .message-meta {
-    font-size: 11px;
+    font-size: 12px;
     gap: 10px;
   }
   .message p {
@@ -2498,7 +2498,7 @@ td small {
     color: var(--muted);
   }
   td small {
-    font-size: 11px;
+    font-size: 12px;
   }
   .notice {
     margin-top: 32px;
@@ -2577,5 +2577,18 @@ td small {
   }
 }
 
-@media (min-width: 1251px) { .public-demo, .drive-strip { width: calc(100% - 128px); } }
-.banner input { width: 100%; min-height: 44px; background: white; color: var(--ink); border: 1px solid var(--border); border-radius: 8px; padding: 8px; }
+@media (min-width: 1251px) {
+  .public-demo,
+  .drive-strip {
+    width: calc(100% - 128px);
+  }
+}
+.banner input {
+  width: 100%;
+  min-height: 44px;
+  background: white;
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+}
