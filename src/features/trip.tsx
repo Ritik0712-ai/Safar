@@ -16,6 +16,7 @@ import {
 } from "@/components/ui";
 import { useMutation, useResource } from "@/lib/hooks";
 import { useRideUpdates } from "@/lib/live";
+import { downloadReceipt } from "@/lib/download";
 import { useTracking } from "@/lib/location";
 import { useDriverLocation } from "@/components/location-provider";
 import { canCancel, terminal } from "@/lib/domain";
@@ -36,6 +37,7 @@ export function Trip({ id, workspace }: { id: string; workspace: Role }) {
     [pin, setPin] = useState(""),
     [ownPin, setOwnPin] = useState(""),
     [showPin, setShowPin] = useState(false),
+    [downloading, setDownloading] = useState(false),
     [clock, setClock] = useState(() => Date.now());
   const stopGps = ownGps.stop;
   const refreshAccount = auth.refresh;
@@ -320,6 +322,26 @@ export function Trip({ id, workspace }: { id: string; workspace: Role }) {
                       : "Passenger payment pending. Earnings appear after capture."}
                   </p>
                 )}
+                {isDriver && ride.payment?.capturedPaymentId && (
+                  <Button
+                    variant="secondary"
+                    busy={downloading}
+                    onClick={async () => {
+                      setDownloading(true);
+                      try {
+                        await downloadReceipt(id);
+                      } catch (e) {
+                        m.setError(
+                          e instanceof Error ? e.message : "Download failed.",
+                        );
+                      } finally {
+                        setDownloading(false);
+                      }
+                    }}
+                  >
+                    Download test receipt
+                  </Button>
+                )}
               </>
             )}
             {["cancelled", "expired"].includes(status) && (
@@ -382,19 +404,15 @@ export function Trip({ id, workspace }: { id: string; workspace: Role }) {
                     {ownGps.tracking && ownGps.simulation && (
                       <Button
                         variant="secondary"
-                        onClick={() => {
-                          const p = ride.routeGeometry?.coordinates ?? [];
-                          const last =
-                            p[
-                              Math.min(
-                                Math.max(1, Math.floor(p.length / 2)),
-                                p.length - 1,
+                        onClick={() =>
+                          ownGps.moving
+                            ? ownGps.pauseMovement()
+                            : ownGps.followRoute(
+                                ride.routeGeometry?.coordinates ?? [],
                               )
-                            ];
-                          if (last) ownGps.move(last[1], last[0]);
-                        }}
+                        }
                       >
-                        Move along route
+                        {ownGps.moving ? "Pause movement" : "Move along route"}
                       </Button>
                     )}
                     <Button variant="ghost" onClick={ownGps.stop}>

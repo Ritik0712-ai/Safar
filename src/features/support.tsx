@@ -353,11 +353,13 @@ export function TicketThread({
     [extra, setExtra] = useState<Message[]>([]),
     [cursor, setCursor] = useState<string | null>(null),
     [target, setTarget] = useState<string | null>(null);
+  const [paginationStarted, setPaginationStarted] = useState(false);
   async function more() {
     await m.run<Ticket>(
       `support/tickets/${id}?cursor=${encodeURIComponent(cursor ?? r.data!.nextCursor!)}`,
       undefined,
       (p) => {
+        setPaginationStarted(true);
         setExtra([...extra, ...(p.messages ?? [])]);
         setCursor(p.nextCursor ?? null);
       },
@@ -372,7 +374,15 @@ export function TicketThread({
       </Banner>
     );
   const ticket = r.data,
-    messages = [...(ticket.messages ?? []), ...extra];
+    messages = [
+      ...new Map(
+        [
+          ...(ticket.messages ?? []),
+          ...extra,
+          ...(ticket.recentMessages ?? []),
+        ].map((m) => [m.id, m]),
+      ).values(),
+    ].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
   return (
     <div className="thread">
       <Link
@@ -400,11 +410,13 @@ export function TicketThread({
           >
             <div className="message-meta">
               <strong>
-                {msg.authorRole === "admin"
-                  ? "Support"
-                  : msg.authorId === auth.user?.uid
-                    ? "You"
-                    : "Passenger / driver"}
+                {msg.authorId === "system"
+                  ? "System"
+                  : msg.authorRole === "admin"
+                    ? "Support"
+                    : msg.authorId === auth.user?.uid
+                      ? "You"
+                      : "Passenger / driver"}
               </strong>
               <span>{date(msg.createdAt)}</span>
             </div>
@@ -412,7 +424,7 @@ export function TicketThread({
           </article>
         ))}
       </div>
-      {(extra.length ? cursor : ticket.nextCursor) && (
+      {(paginationStarted ? cursor : ticket.nextCursor) && (
         <Button variant="secondary" busy={m.busy} onClick={more}>
           Load more messages
         </Button>
@@ -431,10 +443,15 @@ export function TicketThread({
           className="reply-form"
           onSubmit={(e) => {
             e.preventDefault();
-            void m.run(`support/tickets/${id}/messages`, { body }, async () => {
-              setBody("");
-              await r.refresh();
-            });
+            void m.run<{ message: Message }>(
+              `support/tickets/${id}/messages`,
+              { body },
+              async (result) => {
+                setBody("");
+                setExtra((previous) => [...previous, result.message]);
+                await r.refresh();
+              },
+            );
           }}
         >
           <div className="field">

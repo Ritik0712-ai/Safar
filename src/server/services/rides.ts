@@ -322,6 +322,12 @@ export async function accept(op: Operation, id: string) {
       d = dto<Driver>(dd),
       u = dto<Account>(ud);
     ensure(
+      location.source !== "simulation" || (d.isDemo && u.isDemo),
+      403,
+      "SIMULATION_FORBIDDEN",
+      "Only seeded demo identities can simulate location.",
+    );
+    ensure(
       od.exists && od.data()?.status === "open",
       404,
       "OFFER_UNAVAILABLE",
@@ -368,7 +374,9 @@ export async function accept(op: Operation, id: string) {
       ),
       v = dto<Vehicle>(vdoc);
     ensure(
-      v.approvalStatus === "approved" &&
+      v.driverId === a.uid &&
+        v.seats === 4 &&
+        v.approvalStatus === "approved" &&
         v.applicationVersion === d.applicationVersion &&
         rider.data()?.activeRideId === id,
       409,
@@ -380,7 +388,14 @@ export async function accept(op: Operation, id: string) {
       driverId: a.uid,
       vehicleId: v.id,
       driverSnapshot: person(u),
-      vehicleSnapshot: v,
+      vehicleSnapshot: {
+        vehicleId: v.id,
+        plate: v.plate,
+        make: v.make,
+        model: v.model,
+        color: v.color,
+        seats: v.seats,
+      },
       status: "assigned",
       assignedAt: now(),
       trackingMode: location.source,

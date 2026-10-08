@@ -26,8 +26,12 @@ export function useLocationController() {
   const auth = useAuth(),
     [location, setLocation] = useState<Location | null>(null),
     [error, setError] = useState(""),
-    [simulation, setSimulation] = useState(false);
+    [simulation, setSimulation] = useState(false),
+    [moving, setMoving] = useState(false);
   const session = useRef<string>(""),
+    path = useRef<{ points: number[][]; index: number; stride: number } | null>(
+      null,
+    ),
     activeRide = useRef(auth.driver?.activeRideId),
     sequence = useRef(0),
     watch = useRef<number | null>(null),
@@ -95,6 +99,8 @@ export function useLocationController() {
     watch.current = null;
     simTimer.current = null;
     setTracking(false);
+    path.current = null;
+    setMoving(false);
   }, []);
   async function start(sim = false) {
     stop();
@@ -111,10 +117,21 @@ export function useLocationController() {
           document.visibilityState === "visible" &&
           navigator.onLine &&
           latest.current
-        )
-          send(latest.current.lat, latest.current.lng, 5, "simulation").catch(
-            (e) => setError(e.message),
-          );
+        ) {
+          let lat = latest.current.lat,
+            lng = latest.current.lng;
+          if (path.current) {
+            const p = path.current;
+            p.index = Math.min(p.index + p.stride, p.points.length - 1);
+            lng = p.points[p.index][0];
+            lat = p.points[p.index][1];
+            if (p.index === p.points.length - 1) {
+              path.current = null;
+              setMoving(false);
+            }
+          }
+          send(lat, lng, 5, "simulation").catch((e) => setError(e.message));
+        }
       }, 5000);
       return;
     }
@@ -177,6 +194,19 @@ export function useLocationController() {
     if (simulation && tracking)
       void send(lat, lng, 5, "simulation").catch((e) => setError(e.message));
   }
+  function followRoute(points: number[][]) {
+    if (!simulation || !tracking || points.length < 2) return;
+    path.current = {
+      points,
+      index: 0,
+      stride: Math.max(1, Math.ceil(points.length / 60)),
+    };
+    setMoving(true);
+  }
+  function pauseMovement() {
+    path.current = null;
+    setMoving(false);
+  }
   useEffect(
     () => () => {
       if (watch.current !== null)
@@ -194,5 +224,17 @@ export function useLocationController() {
   useEffect(() => {
     activeRide.current = auth.driver?.activeRideId;
   }, [auth.driver?.activeRideId]);
-  return { location, error, simulation, tracking, start, stop, move, setError };
+  return {
+    location,
+    error,
+    simulation,
+    tracking,
+    start,
+    stop,
+    move,
+    setError,
+    moving,
+    followRoute,
+    pauseMovement,
+  };
 }

@@ -102,6 +102,14 @@ export interface Vehicle {
   approvalStatus: string;
   applicationVersion: number;
 }
+export interface VehicleSnapshot {
+  vehicleId: string;
+  plate: string;
+  make: string;
+  model: string;
+  color: string;
+  seats: number;
+}
 export interface Driver {
   id: string;
   uid: string;
@@ -167,7 +175,7 @@ export interface Ride extends Omit<Quote, "expiresAt" | "consumedByRideId"> {
     | "review_required";
   riderSnapshot: Person;
   driverSnapshot?: Person;
-  vehicleSnapshot?: Vehicle;
+  vehicleSnapshot?: VehicleSnapshot;
   createdAt: string;
   updatedAt: string;
   searchExpiresAt: string;
@@ -230,6 +238,7 @@ export interface Ticket {
   version: number;
   hasAdminReply: boolean;
   messages?: Message[];
+  recentMessages?: Message[];
   nextCursor?: string | null;
 }
 export interface Message {
@@ -255,7 +264,8 @@ export const money = (paise: number) =>
   new Intl.NumberFormat("en-IN", {
     style: "currency",
     currency: "INR",
-    maximumFractionDigits: 0,
+    minimumFractionDigits: paise % 100 === 0 ? 0 : 2,
+    maximumFractionDigits: 2,
   }).format(paise / 100);
 export const date = (value: string) =>
   new Intl.DateTimeFormat("en-IN", {

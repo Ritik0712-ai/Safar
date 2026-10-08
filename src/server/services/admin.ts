@@ -149,7 +149,13 @@ export async function earnings(a: Actor, range: string, cursor: string | null) {
   const pending = db
     .collection("payments")
     .where("driverId", "==", a.uid)
-    .where("status", "in", ["pending", "processing", "failed"]);
+    .where("status", "in", [
+      "pending",
+      "processing",
+      "failed",
+      "review_required",
+    ])
+    .where("capturedPaymentId", "==", null);
   const [p, total, pendingTotal, today] = await Promise.all([
     page<Ledger>(q, `${a.uid}:earnings:${range}`, cursor, "capturedAt"),
     q.aggregate({ total: AggregateField.sum("driverSharePaise") }).get(),

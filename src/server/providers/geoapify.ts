@@ -56,6 +56,7 @@ export async function search(q: string): Promise<Place[]> {
   );
   const data = z.object({ features: z.array(feature) }).parse(
     await geo("geocode/autocomplete", {
+      lang:'en',
       text: q,
       filter: `circle:${area.center.lng},${area.center.lat},${area.radiusMeters}`,
       bias: `proximity:${area.center.lng},${area.center.lat}`,
@@ -78,7 +79,7 @@ export async function reverse(lat: number, lng: number): Promise<Place> {
     const data = z
       .object({ features: z.array(feature) })
       .parse(
-        await geo("geocode/reverse", { lat: String(lat), lon: String(lng) }),
+        await geo("geocode/reverse", { lang:'en',lat: String(lat), lon: String(lng) }),
       );
     name = data.features[0]?.properties.formatted ?? name;
   } catch {}

@@ -130,6 +130,7 @@ export async function driver(a: Actor) {
     ...d,
     vehicle: vehicle?.exists ? dto<Vehicle>(vehicle) : undefined,
     simulationAllowed:
+      d.isDemo &&
       process.env.DEMO_MODE === "true" &&
       process.env.APP_ENV !== "production" &&
       process.env.DEMO_DRIVER_UIDS?.split(",").includes(a.uid) === true,

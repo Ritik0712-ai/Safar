@@ -1,11 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { fare, distance, canCancel, terminal, safeNext } from "@/lib/domain";
-import { placeSchema, profileSchema } from "@/contracts";
+import { placeSchema, profileSchema,money } from "@/contracts";
 describe("locked fare and boundaries", () => {
   it("computes the documented 5 km / 15 minute fare in integer paise", () => {
     expect(fare(5000, 900).totalPaise).toBe(11500);
   });
   it("enforces the minimum and rounds up to whole rupees", () => {
+    expect(money(9280)).toBe('₹92.80');
     expect(fare(201, 30).totalPaise).toBe(8000);
     const f = fare(5312, 917);
     expect(f.totalPaise % 100).toBe(0);

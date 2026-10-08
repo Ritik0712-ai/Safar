@@ -1,12 +1,13 @@
 "use client";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState, useRef, type FormEvent } from "react";
 import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signInWithPopup,
   signInWithRedirect,
+  getRedirectResult,
   GoogleAuthProvider,
   sendEmailVerification,
   sendPasswordResetEmail,
@@ -22,6 +23,7 @@ import { api, exchange, useAuth } from "./auth-provider";
 import { Brand, Button, Banner } from "./ui";
 import type { Account } from "@/contracts";
 export function AuthScreens({ screen }: { screen: string }) {
+  const redirectHandled = useRef(false);
   const router = useRouter(),
     params = useSearchParams(),
     auth = useAuth();
@@ -90,6 +92,27 @@ export function AuthScreens({ screen }: { screen: string }) {
     router.push(safeNext(params.get("next"), fallback));
     router.refresh();
   }
+  useEffect(() => {
+    if (!["sign-in", "sign-up"].includes(screen) || redirectHandled.current)
+      return;
+    redirectHandled.current = true;
+    const f = firebase();
+    if (!f) return;
+    void getRedirectResult(f.auth)
+      .then((result) => {
+        if (result)
+          void continueAccount().catch((e) =>
+            setError(
+              e instanceof Error ? e.message : "Sign in again to continue.",
+            ),
+          );
+      })
+      .catch(() =>
+        setError("Google sign-in could not complete. Use email or try again."),
+      );
+    // The redirect result is consumed once per mount, including SDK persistence recovery.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [screen]);
   async function google(redirect = false) {
     setBusy(true);
     setError("");
@@ -222,9 +245,7 @@ export function AuthScreens({ screen }: { screen: string }) {
   async function resend() {
     setBusy(true);
     try {
-      await sendEmailVerification(firebase()!.auth.currentUser!, {
-        url: window.location.origin + "/sign-in",
-      });
+      await api("me/verification-email", {});
       setSuccess("A new verification link was sent.");
       setCooldown(60);
     } catch {

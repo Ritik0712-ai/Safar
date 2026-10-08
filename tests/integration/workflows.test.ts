@@ -1,6 +1,7 @@
 import { beforeAll, describe, it, expect, vi } from "vitest";
 import { randomUUID, createHmac } from "node:crypto";
 import { geohashForLocation } from "geofire-common";
+import { Timestamp } from "firebase-admin/firestore";
 import { admin } from "@/lib/firebase/admin";
 import { base, now, type Actor, type Operation } from "@/server/core";
 import { createQuote } from "@/server/services/quotes";
@@ -11,6 +12,7 @@ import {
   pin,
   readRide,
   review,
+  offers,
 } from "@/server/services/rides";
 import {
   createTicket,
@@ -23,7 +25,9 @@ import {
   webhook,
   order,
   receipt,
+  verify,
 } from "@/server/services/payments";
+import { application, decision } from "@/server/services/accounts";
 import { matches, reveal, secret } from "@/server/providers/pin";
 import type { Account } from "@/contracts";
 const db = () => admin().db;
@@ -112,13 +116,11 @@ async function driver(a: Actor) {
       applicationVersion: 1,
     });
   await admin().rtdb.ref(`driverLocations/${a.uid}`).set(location);
-  await admin()
-    .rtdb.ref(`driverPresence/${a.uid}`)
-    .set({
-      online: true,
-      timestamp: location.timestamp,
-      sessionId: location.sessionId,
-    });
+  await admin().rtdb.ref(`driverPresence/${a.uid}`).set({
+    online: true,
+    timestamp: location.timestamp,
+    sessionId: location.sessionId,
+  });
 }
 async function requested(a: Actor) {
   const q = await createQuote(a, {
@@ -165,6 +167,121 @@ describe("real emulator lifecycle, permissions and concurrency", () => {
     expect(s.pinCiphertext).not.toBe(p);
     expect(matches("ride-a", p, s.pinHmac)).toBe(true);
     expect(matches("ride-b", p, s.pinHmac)).toBe(false);
+  });
+  it("validates versioned approval, unique registrations and suspension locks", async () => {
+    const d = await user("application-driver", "driver"),
+      other = await user("application-other", "driver"),
+      ad = await user("application-admin", "admin");
+    await Promise.all([driver(d), driver(other)]);
+    for (const a of [d, other])
+      await db()
+        .doc(`drivers/${a.uid}`)
+        .update({
+          approvalStatus: "draft",
+          availability: "offline",
+          activeVehicleId: null,
+        });
+    const body = {
+      plate: "KA01ZX9876",
+      make: "Maruti Suzuki",
+      model: "Dzire",
+      color: "White",
+      seats: 4,
+      intent: "submit",
+      expectedVersion: 1,
+    };
+    await application(op(d, "application", body));
+    await expect(
+      application(op(other, "application", body)),
+    ).rejects.toMatchObject({ status: 409 });
+    await expect(
+      decision(
+        op(ad, "decision", {
+          decision: "approve",
+          reason: "",
+          expectedVersion: 2,
+          applicationVersion: 1,
+        }),
+        d.uid,
+      ),
+    ).rejects.toMatchObject({ status: 409 });
+    await decision(
+      op(ad, "decision", {
+        decision: "approve",
+        reason: "",
+        expectedVersion: 2,
+        applicationVersion: 2,
+      }),
+      d.uid,
+    );
+    expect(
+      (await db().doc(`drivers/${d.uid}`).get()).data()?.approvalStatus,
+    ).toBe("approved");
+    await db().doc(`drivers/${d.uid}`).update({ activeRideId: "active-test" });
+    await expect(
+      decision(
+        op(ad, "decision", {
+          decision: "suspend",
+          reason: "Controlled test review",
+          expectedVersion: 3,
+          applicationVersion: 2,
+        }),
+        d.uid,
+      ),
+    ).rejects.toMatchObject({ status: 409 });
+    await db().doc(`drivers/${d.uid}`).update({ activeRideId: null });
+  });
+  it("keeps expired offers from hiding the next valid request", async () => {
+    const a = await user("offers-rider"),
+      d = await user("offers-driver", "driver");
+    await driver(d);
+    const expiry = Timestamp.fromMillis(Date.now() - 1000);
+    for (let i = 0; i < 12; i++)
+      await db()
+        .doc(`drivers/${d.uid}/offers/old-${i}`)
+        .set({ ...base(), status: "open", expiresAt: expiry });
+    const { id } = await requested(a);
+    expect((await offers(d)).items.map((o) => o.rideId)).toContain(id);
+    await transition(
+      op(a, "cancel", { expectedVersion: 1, reason: "plans_changed" }),
+      id,
+      "cancel",
+    );
+  });
+  it("records authorized payments as processing without releasing debt or creating a receipt", async () => {
+    const { id, rider } = await completed("authorized"),
+      orderId = "order_" + id,
+      paymentId = "pay_" + id;
+    await db()
+      .doc(`payments/${id}`)
+      .update({ providerOrderId: orderId, orderCreationState: "ready" });
+    const response = {
+      id: paymentId,
+      order_id: orderId,
+      amount: 11500,
+      currency: "INR",
+      status: "authorized",
+      captured: false,
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json(response)),
+    );
+    const signature = createHmac("sha256", "fixture-secret")
+      .update(orderId + "|" + paymentId)
+      .digest("hex");
+    expect(
+      (await verify(rider, { rideId: id, orderId, paymentId, signature }))
+        .status,
+    ).toBe("processing");
+    expect((await db().doc(`rides/${id}`).get()).data()?.paymentStatus).toBe(
+      "processing",
+    );
+    expect(
+      (await db().doc(`users/${rider.uid}`).get()).data()?.activeRideId,
+    ).toBe(id);
+    expect((await db().doc(`receipts/${id}`).get()).exists).toBe(false);
+    vi.unstubAllGlobals();
   });
   it("keeps booking idempotent, protects owners and rejects invalid PIN/cancellation", async () => {
     const rider = await user("flow-rider"),

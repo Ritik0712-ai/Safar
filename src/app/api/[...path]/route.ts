@@ -182,6 +182,41 @@ async function handler(req: Request, ctx: Context) {
       return json({ signedIn: true });
     }
     if (p === "me" && method === "GET") return json(await accounts.me(a));
+    if (p === "me/verification-email" && method === "POST") {
+      await rate(a.uid, "verification_email", 1);
+      const key = process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
+      ensure(
+        key,
+        503,
+        "CONFIGURATION_UNAVAILABLE",
+        "Email verification is being configured.",
+      );
+      const prefix =
+        process.env.FIREBASE_AUTH_EMULATOR_HOST && !process.env.VERCEL
+          ? `http://${process.env.FIREBASE_AUTH_EMULATOR_HOST}/identitytoolkit.googleapis.com/v1/`
+          : "https://identitytoolkit.googleapis.com/v1/";
+      const response = await fetch(
+        `${prefix}accounts:sendOobCode?key=${encodeURIComponent(key)}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            requestType: "VERIFY_EMAIL",
+            idToken: req.headers.get("authorization")!.replace(/^Bearer /, ""),
+            continueUrl: `${process.env.APP_ORIGIN}/sign-in`,
+            canHandleCodeInApp: false,
+          }),
+          signal: AbortSignal.timeout(12000),
+        },
+      );
+      ensure(
+        response.ok,
+        502,
+        "VERIFICATION_EMAIL_UNAVAILABLE",
+        "The verification link could not be sent. Please try again later.",
+      );
+      return json({ sent: true });
+    }
     if (p === "me/onboarding" && method === "POST")
       return json(await accounts.onboard(op()));
     if (p === "me" && method === "PATCH")

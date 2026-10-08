@@ -47,9 +47,11 @@ export async function createTicket(op: Operation) {
       hasAdminReply: false,
       isDemo: a.account!.isDemo,
     });
-    t.create(ref.collection("messages").doc(), {
+    const messageRef = ref.collection("messages").doc(),
+      stamp = now();
+    t.create(messageRef, {
       schemaVersion: 1,
-      createdAt: now(),
+      createdAt: stamp,
       ticketId: ref.id,
       authorId: a.uid,
       authorRole: b.workspace,
@@ -78,9 +80,15 @@ export async function getTicket(
     "createdAt",
     true,
   );
+  const recent = await doc.ref
+    .collection("messages")
+    .orderBy("createdAt", "desc")
+    .limit(5)
+    .get();
   return {
     ...dto<Ticket>(doc),
     messages: messages.items,
+    recentMessages: recent.docs.map((d) => dto<Message>(d)),
     nextCursor: messages.nextCursor,
   };
 }
@@ -134,12 +142,15 @@ export async function message(op: Operation, id: string) {
       "TICKET_RESOLVED",
       "Reopen this request before replying.",
     );
-    t.create(ref.collection("messages").doc(), {
+    const messageRef = ref.collection("messages").doc(),
+      stamp = now(),
+      authorRole = a.admin ? "admin" : ticket.ownerWorkspace;
+    t.create(messageRef, {
       schemaVersion: 1,
-      createdAt: now(),
+      createdAt: stamp,
       ticketId: id,
       authorId: a.uid,
-      authorRole: a.admin ? "admin" : ticket.ownerWorkspace,
+      authorRole,
       body: b.body,
       requestId: op.key,
     });
@@ -150,7 +161,16 @@ export async function message(op: Operation, id: string) {
       hasAdminReply: ticket.hasAdminReply || a.admin,
       status: a.admin ? "in_progress" : ticket.status,
     });
-    return { sent: true };
+    return {
+      sent: true,
+      message: {
+        id: messageRef.id,
+        body: b.body,
+        authorId: a.uid,
+        authorRole,
+        createdAt: stamp.toDate().toISOString(),
+      },
+    };
   });
 }
 export async function ticketStatus(op: Operation, id: string) {

@@ -55,6 +55,12 @@ export async function heartbeat(a: Actor, body: unknown) {
       "Your vehicle must be approved before driving.",
     );
     ensure(
+      b.source !== "simulation" || (d.isDemo && user.data()?.isDemo === true),
+      403,
+      "SIMULATION_FORBIDDEN",
+      "Only seeded demo identities can simulate location.",
+    );
+    ensure(
       !user.data()?.activeRideId,
       409,
       "PASSENGER_RIDE_ACTIVE",
@@ -78,7 +84,8 @@ export async function heartbeat(a: Actor, body: unknown) {
     .set({
       approved: true,
       trackingAllowed: true,
-      simulationAllowed: simulationAllowed(a.uid),
+      simulationAllowed:
+        simulationAllowed(a.uid) && d.isDemo && a.account?.isDemo === true,
       sessionId: b.sessionId,
       expiresAt: Date.now() + 90000,
     });
