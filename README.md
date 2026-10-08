@@ -8,7 +8,7 @@ A responsive Bengaluru cab-booking website with passenger, driver and administra
 
 The complete application and all workspaces are implemented. Firebase Authentication, Firestore Standard, Realtime Database, rules/indexes and Vercel are connected. Deployed authentication, session exchange, onboarding, role rejection, persisted support and idempotency were verified.
 
-Geoapify and Razorpay integration code is implemented, but their project/test credentials still need to be configured. The deployed site refuses to invent a road quote or payment success. `/api/health` returns `503` with `degraded` until those dependencies are configured. The two-browser journey passes with explicitly labelled automated fixtures; that is **not** evidence of a real Geoapify route or Razorpay sandbox capture. See [release evidence](docs/07-release-evidence.md).
+Safar's free Geoapify project and distinct browser/server keys are configured, along with Razorpay Test Mode credentials and a signed capture webhook. The deployed site returns healthy configuration and an actual road quote: 1,773 metres, 204 seconds and the ₹80 minimum fare. A separate controlled emulator trip used real Geoapify and Razorpay Checkout, confirmed a real sandbox capture, generated its receipt and recorded the ₹64 driver share. Location in that check was explicitly simulated; a physical GPS and complete deployed two-account pilot remain open. See [release evidence](docs/07-release-evidence.md).
 
 ## What is included
 
@@ -53,6 +53,14 @@ npm run test:integration
 
 Integration tests require the emulators. The concurrency test performs 100 two-driver acceptance trials and can take several minutes. It resets only the `demo-safar` emulator database, so do not use that namespace for valuable local records while running the suite.
 
+With private service configuration loaded, run read-only checks against actual address search, road routing, Test Mode credential access and website health:
+
+```sh
+node --env-file=.env.live.local scripts/verify-services.mjs
+```
+
+The script prints results without credential values and creates no payment. `/api/health` checks configuration presence; these provider checks verify actual responses.
+
 ```sh
 npx playwright install chromium
 E2E_EMULATORS=true npm run test:e2e
@@ -66,7 +74,7 @@ npm run test:journey
 Copy `.env.example` to an ignored environment file and supply the actual values. Browser Firebase configuration and a restricted Geoapify tile key use `NEXT_PUBLIC_`; Admin credentials, routing keys, payment secrets and signing keys remain server-only.
 
 1. Firebase: enable email/password and Google; authorize the exact deployment domain. Use a dedicated runtime service account with Datastore, Firebase Auth and RTDB permissions. Do not give a browser this credential.
-2. Geoapify: create Safar on the intended free plan; use distinct server and browser keys. Restrict the browser key to the exact website/local origins. OSM tiles provide an attributed map preview while the tile key is absent; there is no road-routing fallback outside automated tests.
+2. Geoapify: Safar is on the free plan with distinct server and browser keys. Browser HTTP Referer filters allow the stable website and localhost/127.0.0.1 ports 3000–3001. A foreign-referrer geocoding request was rejected with 401; raster tile requests still returned 200 with a foreign referrer, so tile restriction enforcement remains unverified. Browser keys are public configuration; keep the unrestricted routing key server-only. Map attribution includes Geoapify, OpenStreetMap and OpenMapTiles. There is no road-routing fallback outside automated tests.
 3. Razorpay: use `rzp_test_` credentials and `PAYMENT_MODE=test`. Set a webhook at `https://safar-kappa-six.vercel.app/api/webhooks/razorpay`, subscribing to captured payments with the matching server webhook secret. Configure automatic capture on the test account. Do not activate live payments or payouts.
 4. Set `APP_ORIGIN` to the exact stable HTTPS origin. Deploy rules/indexes before the app. Keep `DEMO_MODE=false` in production and use a separate preview project for further pilots.
 
@@ -89,6 +97,8 @@ Firestore owns lifecycle, quote, payment and account state. Client durable write
 The deployed project selected by Ritik is `portfolio-69e1b`, now named Safar. Its existing Standard database is in `nam5`; RTDB is in `us-central1` and Vercel runs near the database. No existing database was recreated or existing identities overwritten. Do not assume the proposed Mumbai region was provisioned.
 
 The rules are a tested prototype for the controlled release. The emulator matrix covers ownership, role/field tampering, default deny, orphan access, tracking expiry, sequencing and simulation allowlisting. Broader launch still requires provider verification, physical foreground GPS, accessibility/device checks, quota/latency measurement and operational review.
+
+Signed capture webhooks for orders absent from Safar's own Test Mode mapping are acknowledged without financial writes or provider requests. This prevents unrelated merchant-account events from causing unnecessary retries; mapped orders still require provider confirmation and matching amount/currency.
 
 ```sh
 npm run maintenance
