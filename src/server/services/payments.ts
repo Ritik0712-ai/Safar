@@ -537,6 +537,13 @@ export async function webhook(
       .parse(JSON.parse(raw)),
     capture = body.payload.payment?.entity;
   if (!capture || body.event !== "payment.captured") return { received: true };
+  const mapping = await admin()
+    .db.doc(`providerOrders/${capture.order_id}`)
+    .get();
+  // A merchant's test account can also send events for other applications.
+  // Acknowledge those signed events without changing Safar financial records.
+  if (!mapping.exists || mapping.data()?.mode !== "test")
+    return { received: true, ignored: true };
   const confirmed = captureSchema.parse(
     await provider(`payments/${encodeURIComponent(capture.id)}`),
   );

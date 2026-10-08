@@ -174,13 +174,11 @@ describe("real emulator lifecycle, permissions and concurrency", () => {
       ad = await user("application-admin", "admin");
     await Promise.all([driver(d), driver(other)]);
     for (const a of [d, other])
-      await db()
-        .doc(`drivers/${a.uid}`)
-        .update({
-          approvalStatus: "draft",
-          availability: "offline",
-          activeVehicleId: null,
-        });
+      await db().doc(`drivers/${a.uid}`).update({
+        approvalStatus: "draft",
+        availability: "offline",
+        activeVehicleId: null,
+      });
     const body = {
       plate: "KA01ZX9876",
       make: "Maruti Suzuki",
@@ -425,6 +423,46 @@ describe("real emulator lifecycle, permissions and concurrency", () => {
       1,
     );
     vi.unstubAllGlobals();
+  });
+  it("acknowledges signed unrelated orders without provider requests or financial writes", async () => {
+    const raw = JSON.stringify({
+      event: "payment.captured",
+      payload: {
+        payment: {
+          entity: {
+            id: "pay_unrelated",
+            order_id: "order_unrelated",
+            amount: 100,
+            currency: "INR",
+            status: "captured",
+            captured: true,
+          },
+        },
+      },
+    });
+    const signature = createHmac("sha256", "fixture-webhook")
+      .update(raw)
+      .digest("hex");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      await expect(
+        webhook(raw, "0".repeat(64), "evt_unrelated"),
+      ).rejects.toMatchObject({ status: 401 });
+      await expect(webhook(raw, signature, "evt_unrelated")).resolves.toEqual({
+        received: true,
+        ignored: true,
+      });
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(
+        (await db().doc("providerPayments/pay_unrelated").get()).exists,
+      ).toBe(false);
+      expect((await db().doc("webhookEvents/evt_unrelated").get()).exists).toBe(
+        false,
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
   it("does not recreate provider orders after an ambiguous creation timeout", async () => {
     const { id, rider } = await completed("ambiguous");

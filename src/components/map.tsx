@@ -95,7 +95,7 @@ export default function CityMap({
           }
           attribution={
             key
-              ? 'Powered by <a href="https://www.geoapify.com/">Geoapify</a> | &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+              ? 'Powered by <a href="https://www.geoapify.com/">Geoapify</a> | &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> | <a href="https://openmaptiles.org/">OpenMapTiles</a>'
               : '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
           }
           eventHandlers={{ tileerror: () => setError(true) }}
